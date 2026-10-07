@@ -120,6 +120,21 @@ export interface DeletionConfig {
 }
 
 /**
+ * Where the bridge consumes space events, where it announces each space's
+ * Matrix space, and how the homeserver's SSO mapping named the accounts: from
+ * the member's `username` or from the local part of their `email`.
+ */
+export interface SpacesConfig {
+  readonly exchange: string;
+  readonly queue: string;
+  readonly routingKey: string;
+  readonly activityExchange: string;
+  readonly localpartFrom: "uid" | "email";
+  /** TwakeSpace's app service user, which posts the feed. Default: `@twake-space:<domain>` */
+  readonly twakeSpaceUserId?: string;
+}
+
+/**
  * Complete configuration for the common-settings bridge.
  */
 export interface BridgeConfig {
@@ -131,6 +146,8 @@ export interface BridgeConfig {
   readonly database: DatabaseConfig;
   /** Account erasure on user deletion. Off when omitted. */
   readonly deletion?: DeletionConfig;
+  /** Matrix spaces for TwakeSpace spaces. Off when omitted. */
+  readonly spaces?: SpacesConfig;
 }
 
 /**
