@@ -154,6 +154,7 @@ describe("createSpaceEventHandler", () => {
       await handler()(created, properties("created"));
 
       expect(matrix.createSpace).toHaveBeenCalledWith(SPACE, "Design Sprint");
+      expect(matrix.ensureUser).toHaveBeenCalledWith("@twake-space:acme.example", "TwakeSpace");
       expect(matrix.ensureUser).toHaveBeenCalledWith("@jdoe:acme.example", "John Doe");
       expect(matrix.ensureUser).toHaveBeenCalledWith("@vlee:acme.example", "vlee");
       expect(matrix.join.mock.calls).toEqual([

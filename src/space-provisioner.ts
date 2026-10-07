@@ -188,6 +188,8 @@ export function createSpaceEventHandler({
     const name = requireString(message, "name");
     const roomId = (await matrix.findSpace(spaceId)) ?? (await matrix.createSpace(spaceId, name));
 
+    // An app service user only exists once its app service registers it, which TwakeSpace may not have done yet
+    await matrix.ensureUser(twakeSpaceUserId, "TwakeSpace");
     await matrix.join(roomId, twakeSpaceUserId);
     const levels = await addMembers(roomId, spaceId, membersOf(message), timestamp);
     await matrix.setPowerLevels(roomId, {
