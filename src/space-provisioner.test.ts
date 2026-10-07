@@ -476,4 +476,254 @@ describe("createSpaceEventHandler", () => {
 
     expect(matrix.join).not.toHaveBeenCalled();
   });
+
+  describe("deleted", () => {
+    it("removes every member and keeps the Matrix space 30 days from the deletion", async () => {
+      matrix.members.mockResolvedValue([
+        "@twakespace:acme.example",
+        "@jdoe:acme.example",
+      ]);
+      const deleted = spaceEvent({});
+
+      await handler()(deleted, properties("deleted"));
+
+      expect(matrix.kick.mock.calls).toEqual([
+        [
+          ROOM,
+          "@twakespace:acme.example",
+        ],
+        [
+          ROOM,
+          "@jdoe:acme.example",
+        ],
+      ]);
+      expect(await registry.deletionOf(SPACE)).toBe(Date.parse(deleted.timestamp) + RETENTION_MS);
+      expect(matrix.deleteSpace).not.toHaveBeenCalled();
+    });
+
+    it("records the deletion of a space without a Matrix space, so a retried created stays out", async () => {
+      matrix.findSpace.mockResolvedValue(null);
+      const handle = handler();
+
+      await handle(spaceEvent({}), properties("deleted"));
+      await handle(
+        spaceEvent({
+          name: "Design Sprint",
+          members: [
+            jdoe,
+          ],
+        }),
+        properties("created"),
+      );
+
+      expect(matrix.kick).not.toHaveBeenCalled();
+      expect(matrix.createSpace).not.toHaveBeenCalled();
+      expect(registry.spaces.get(SPACE)?.roomId).toBeNull();
+    });
+
+    it("ignores what arrives after the deletion, the deletion included", async () => {
+      matrix.members.mockResolvedValue([
+        "@jdoe:acme.example",
+      ]);
+      const handle = handler();
+      await handle(spaceEvent({}), properties("deleted"));
+      const deleteAt = await registry.deletionOf(SPACE);
+      matrix.kick.mockClear();
+
+      await handle(
+        spaceEvent({
+          members: [
+            jdoe,
+          ],
+        }),
+        properties("member.added"),
+      );
+      await handle(spaceEvent({}), properties("deleted"));
+
+      expect(matrix.join).not.toHaveBeenCalled();
+      expect(matrix.kick).not.toHaveBeenCalled();
+      expect(await registry.deletionOf(SPACE)).toBe(deleteAt);
+    });
+  });
+
+  describe("synced", () => {
+    const synced = spaceEvent({
+      name: "Design Sprint",
+      members: [
+        jdoe,
+      ],
+      groups: [],
+    });
+
+    it("creates a missing Matrix space and announces it", async () => {
+      matrix.findSpace.mockResolvedValue(null);
+
+      await handler()(synced, properties("synced"));
+
+      expect(matrix.createSpace).toHaveBeenCalledWith(SPACE, "Design Sprint");
+      expect(matrix.join).toHaveBeenCalledWith(ROOM, "@jdoe:acme.example");
+      expect(publish).toHaveBeenCalledWith(PROVISIONED_TYPE, expect.anything());
+      expect(registry.spaces.get(SPACE)).toMatchObject({
+        organizationId: "acme",
+        roomId: ROOM,
+        timestamp: Date.parse(synced.timestamp),
+      });
+    });
+
+    it("renames the Matrix space and removes who is no longer listed", async () => {
+      matrix.members.mockResolvedValue([
+        "@twakespace:acme.example",
+        "@jdoe:acme.example",
+        "@vlee:acme.example",
+      ]);
+
+      await handler()(synced, properties("synced"));
+
+      expect(matrix.rename).toHaveBeenCalledWith(ROOM, "Design Sprint");
+      expect(matrix.kick.mock.calls).toEqual([
+        [
+          ROOM,
+          "@vlee:acme.example",
+        ],
+      ]);
+      expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, {
+        "@jdoe:acme.example": 50,
+        "@vlee:acme.example": null,
+        "@twakespace:acme.example": 50,
+      });
+    });
+
+    it("keeps a member added after the sync read the directory", async () => {
+      matrix.members.mockResolvedValue([
+        "@vlee:acme.example",
+      ]);
+      const handle = handler();
+      await handle(
+        spaceEvent({
+          timestamp: "2026-10-06T10:00:00.000Z",
+          members: [
+            viewer,
+          ],
+        }),
+        properties("member.added"),
+      );
+
+      await handle(synced, properties("synced"));
+
+      expect(matrix.kick).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("sync.completed", () => {
+    function completed(spaceIds: unknown) {
+      return {
+        organizationId: "acme",
+        spaceIds,
+        timestamp: "2026-10-06T09:12:44.512Z",
+      };
+    }
+
+    function known(spaceId: string, timestamp: string, organizationId = "acme") {
+      return registry.remember({
+        spaceId,
+        organizationId,
+        roomId: `!${spaceId}:acme.example`,
+        timestamp: Date.parse(timestamp),
+      });
+    }
+
+    it("removes access to the spaces the sync no longer lists", async () => {
+      matrix.members.mockResolvedValue([
+        "@jdoe:acme.example",
+      ]);
+      await known("gone", "2026-10-01T00:00:00.000Z");
+      await known(SPACE, "2026-10-01T00:00:00.000Z");
+      await known("elsewhere", "2026-10-01T00:00:00.000Z", "globex");
+
+      await handler()(
+        completed([
+          SPACE.toUpperCase(),
+        ]),
+        properties("sync.completed"),
+      );
+
+      expect(matrix.kick.mock.calls).toEqual([
+        [
+          "!gone:acme.example",
+          "@jdoe:acme.example",
+        ],
+      ]);
+      expect(await registry.deletionOf("gone")).not.toBeNull();
+      expect(await registry.deletionOf(SPACE)).toBeNull();
+      expect(await registry.deletionOf("elsewhere")).toBeNull();
+    });
+
+    it("keeps a space provisioned after the sync read the directory", async () => {
+      await known("fresh", "2026-10-06T10:00:00.000Z");
+
+      await handler()(completed([]), properties("sync.completed"));
+
+      expect(await registry.deletionOf("fresh")).toBeNull();
+    });
+
+    it("drops an event without spaceIds instead of retrying it", async () => {
+      await known("gone", "2026-10-01T00:00:00.000Z");
+
+      await handler()(completed(undefined), properties("sync.completed"));
+
+      expect(await registry.deletionOf("gone")).toBeNull();
+    });
+
+    it("drops an event with a malformed space id instead of deleting that space", async () => {
+      await known("gone", "2026-10-01T00:00:00.000Z");
+
+      await handler()(
+        completed([
+          {
+            id: "gone",
+          },
+        ]),
+        properties("sync.completed"),
+      );
+
+      expect(await registry.deletionOf("gone")).toBeNull();
+    });
+  });
+});
+
+describe("purgeDeletedSpaces", () => {
+  it("deletes the Matrix spaces whose retention is over, and keeps a failed one for the next run", async () => {
+    const registry = memoryRegistry();
+    const space = (spaceId: string): KnownSpace => ({
+      spaceId,
+      organizationId: "acme",
+      roomId: `!${spaceId}:acme.example`,
+      timestamp: 0,
+    });
+    await registry.scheduleDeletion(space("due"), 1_000);
+    await registry.scheduleDeletion(space("failing"), 1_000);
+    await registry.scheduleDeletion(space("later"), 5_000);
+    const matrix = {
+      deleteSpace: mock((roomId: string) =>
+        roomId === "!failing:acme.example" ? Promise.reject(new Error("boom")) : Promise.resolve(),
+      ),
+    };
+
+    await purgeDeletedSpaces(
+      {
+        matrix: matrix as never,
+        registry,
+        log,
+      },
+      2_000,
+    );
+
+    expect(matrix.deleteSpace).toHaveBeenCalledTimes(2);
+    expect([
+      ...registry.spaces.keys(),
+    ]).toEqual([
+      "failing",
+      "later",
+    ]);
+  });
 });

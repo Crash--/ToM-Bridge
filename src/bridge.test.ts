@@ -33,6 +33,8 @@ describe("CommonSettingsBridge", () => {
     get: Mock<AnyFn>;
     insert: Mock<AnyFn>;
     update: Mock<AnyFn>;
+    getHigherThan: Mock<AnyFn>;
+    deleteEqual: Mock<AnyFn>;
     close: Mock<AnyFn>;
     ensureColumns: Mock<AnyFn>;
   };
@@ -83,6 +85,8 @@ describe("CommonSettingsBridge", () => {
       get: mock(),
       insert: mock(),
       update: mock(),
+      getHigherThan: mock().mockResolvedValue([]),
+      deleteEqual: mock().mockResolvedValue(undefined),
       close: mock(),
       ensureColumns: mock().mockResolvedValue(undefined),
     } as any;
@@ -420,6 +424,7 @@ describe("CommonSettingsBridge", () => {
             users: {},
           }),
           sendStateEvent: mock().mockResolvedValue("$event"),
+          getRoomMembers: mock().mockResolvedValue([]),
         });
         mockDatabase.get.mockResolvedValue([]);
         mockDatabase.update.mockResolvedValue([]);
@@ -502,6 +507,47 @@ describe("CommonSettingsBridge", () => {
           clock_key: "3b9e2c71/@jdoe:example.com",
           timestamp: Date.parse(created.timestamp),
         });
+      });
+
+      it("keeps a deleted space until its retention is over", async () => {
+        const handler = await startWithSpaces();
+        await handler(created, {
+          routingKey: "twake.space.deleted.acme",
+          headers: {},
+        });
+
+        expect(mockDatabase.insert).toHaveBeenCalledWith("spaces", {
+          space_id: "3b9e2c71",
+          organization_id: "acme",
+          room_id: "!space:example.com",
+          timestamp: Date.parse(created.timestamp),
+          delete_at: expect.any(Number),
+        });
+      });
+
+      it("purges the Matrix spaces whose retention is over", async () => {
+        mockDatabase.getHigherThan.mockResolvedValue([
+          {
+            space_id: "gone",
+            organization_id: "acme",
+            room_id: "!gone:example.com",
+            timestamp: 0,
+            delete_at: 1,
+          },
+        ]);
+
+        await startWithSpaces();
+        await Bun.sleep(0);
+
+        expect(mockIntent.matrixClient.doRequest).toHaveBeenCalledWith(
+          "DELETE",
+          "/_synapse/admin/v2/rooms/!gone%3Aexample.com",
+          null,
+          {
+            purge: true,
+          },
+        );
+        expect(mockDatabase.deleteEqual).toHaveBeenCalledWith("spaces", "space_id", "gone");
       });
 
       it("refuses to start when the bot is not a server admin", async () => {
