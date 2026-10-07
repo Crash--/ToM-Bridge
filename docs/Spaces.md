@@ -32,8 +32,19 @@ a bridge only receives its own. A single installation binds `twake.space.#` on
 * `member.added`, `member.role.changed` - adds the member with the level of
   their role.
 * `member.removed` - removes the member.
+* `deleted` - removes every member at once. The Matrix space is deleted 30
+  days later.
+* `synced` - carries the whole space. The bridge handles it like `created`, and
+  also renames the Matrix space and removes the members it no longer lists.
+* `sync.completed` - lists the organization's spaces. The bridge removes the
+  members of each Matrix space it provisioned before the sync whose space is no
+  longer listed, and deletes it 30 days later, as for `deleted`.
 * Group events are ignored: ldap-rest also publishes a member event for each
   user a group change affects.
+
+ldap-rest publishes `synced` and `sync.completed` for every organization each
+night, and on request
+([linagora/ldap-rest@32f96d0](https://github.com/linagora/ldap-rest/blob/32f96d0f1314543f6d5bb913d1d6d8ac70bdc697/src/plugins/twake/spaces.ts)).
 
 ## The Matrix space
 
@@ -73,5 +84,18 @@ out and logged, and the rest of the event goes ahead.
 
 A member event for a space without a Matrix space yet fails, and is retried
 until its `created` event has been handled or the retries run out.
+
+Once a space is deleted, the bridge ignores its events, since its id is never
+used again.
+
+## Deletion
+
+The bridge keeps, in its database, the Matrix space of each space and when it
+is due for deletion. Every hour, each pod deletes and purges the Matrix spaces
+that are due, through the Synapse admin API.
+
+Without the database, the bridge cannot keep a deletion for 30 days or tell
+which spaces a sync left out, so `deleted` and `sync.completed` fail and end in
+the dead-letter queue. The next nightly sync catches up.
 
 <!-- vim: set ft=markdown fenc=utf-8 spell spl=en tw=80 cc=80 et ts=2: -->

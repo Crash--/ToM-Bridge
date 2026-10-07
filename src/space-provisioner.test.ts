@@ -4,7 +4,16 @@ import type { Logger } from "matrix-appservice-bridge";
 
 import type { RabbitMQMessageProperties } from "@linagora/rabbitmq-client";
 
-import { createSpaceEventHandler, eventName, PROVISIONED_TYPE, type SpaceClock } from "./space-provisioner";
+import {
+  createSpaceEventHandler,
+  eventName,
+  type KnownSpace,
+  PROVISIONED_TYPE,
+  purgeDeletedSpaces,
+  RETENTION_MS,
+  type SpaceClock,
+  type SpaceRegistry,
+} from "./space-provisioner";
 import type { SpacesConfig } from "./types";
 
 const log = {
@@ -70,6 +79,56 @@ function memoryClock(): SpaceClock {
   };
 }
 
+function memoryRegistry(): SpaceRegistry & {
+  spaces: Map<
+    string,
+    KnownSpace & {
+      deleteAt: number | null;
+    }
+  >;
+} {
+  const spaces = new Map<
+    string,
+    KnownSpace & {
+      deleteAt: number | null;
+    }
+  >();
+  return {
+    spaces,
+    remember: (space) => {
+      spaces.set(space.spaceId, {
+        ...space,
+        deleteAt: spaces.get(space.spaceId)?.deleteAt ?? null,
+      });
+      return Promise.resolve();
+    },
+    deletionOf: (spaceId) => Promise.resolve(spaces.get(spaceId)?.deleteAt ?? null),
+    scheduleDeletion: (space, at) => {
+      spaces.set(space.spaceId, {
+        ...space,
+        deleteAt: at,
+      });
+      return Promise.resolve();
+    },
+    spacesOf: (organizationId) =>
+      Promise.resolve(
+        [
+          ...spaces.values(),
+        ].filter((space) => space.organizationId === organizationId && space.deleteAt === null),
+      ),
+    dueBy: (time) =>
+      Promise.resolve(
+        [
+          ...spaces.values(),
+        ].filter((space) => space.deleteAt !== null && space.deleteAt <= time),
+      ),
+    forget: (spaceId) => {
+      spaces.delete(spaceId);
+      return Promise.resolve();
+    },
+  };
+}
+
 describe("eventName", () => {
   it.each([
     [
@@ -98,14 +157,18 @@ describe("createSpaceEventHandler", () => {
     kick: ReturnType<typeof mock>;
     setPowerLevels: ReturnType<typeof mock>;
     rename: ReturnType<typeof mock>;
+    members: ReturnType<typeof mock>;
+    deleteSpace: ReturnType<typeof mock>;
   };
   let publish: ReturnType<typeof mock>;
   let clock: SpaceClock;
+  let registry: ReturnType<typeof memoryRegistry>;
 
   function handler(overrides: Partial<SpacesConfig> = {}) {
     return createSpaceEventHandler({
       matrix,
       clock,
+      registry,
       publish,
       domain: "acme.example",
       config: {
@@ -125,9 +188,12 @@ describe("createSpaceEventHandler", () => {
       kick: mock(async () => {}),
       setPowerLevels: mock(async () => {}),
       rename: mock(async () => {}),
+      members: mock(async () => []),
+      deleteSpace: mock(async () => {}),
     };
     publish = mock(async () => {});
     clock = memoryClock();
+    registry = memoryRegistry();
   });
 
   it("refuses an unknown localpartFrom", () => {
