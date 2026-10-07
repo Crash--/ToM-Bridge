@@ -275,6 +275,84 @@ describe("createSpaceEventHandler", () => {
     });
   });
 
+  describe("member events", () => {
+    it("adds a member with the level of their role", async () => {
+      await handler()(
+        spaceEvent({
+          members: [
+            jdoe,
+          ],
+        }),
+        properties("member.added"),
+      );
+
+      expect(matrix.join).toHaveBeenCalledWith(ROOM, "@jdoe:acme.example");
+      expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, {
+        "@jdoe:acme.example": 50,
+      });
+    });
+
+    it("fails, so it is retried, while the space has no Matrix space", async () => {
+      matrix.findSpace.mockResolvedValue(null);
+
+      await expect(
+        handler()(
+          spaceEvent({
+            members: [
+              jdoe,
+            ],
+          }),
+          properties("member.added"),
+        ),
+      ).rejects.toThrow("has no Matrix space yet");
+    });
+
+    it("ignores a role change older than the last one applied", async () => {
+      const h = handler();
+      await h(
+        spaceEvent({
+          timestamp: "2026-10-06T10:00:00.000Z",
+          members: [
+            jdoe,
+          ],
+        }),
+        properties("member.role.changed"),
+      );
+      matrix.setPowerLevels.mockClear();
+
+      await h(
+        spaceEvent({
+          timestamp: "2026-10-06T09:00:00.000Z",
+          members: [
+            {
+              ...jdoe,
+              role: "viewer",
+            },
+          ],
+        }),
+        properties("member.role.changed"),
+      );
+
+      expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, {});
+    });
+
+    it("removes a member and their level", async () => {
+      await handler()(
+        spaceEvent({
+          members: [
+            jdoe,
+          ],
+        }),
+        properties("member.removed"),
+      );
+
+      expect(matrix.kick).toHaveBeenCalledWith(ROOM, "@jdoe:acme.example");
+      expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, {
+        "@jdoe:acme.example": null,
+      });
+    });
+  });
+
   it("renames the Matrix space", async () => {
     await handler()(
       spaceEvent({
