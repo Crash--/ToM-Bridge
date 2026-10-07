@@ -41,7 +41,16 @@ a bridge only receives its own. A single installation binds `twake.space.#` on
 * Its alias is `#twake-space-<space id>`, lowercased since the directory
   ignores the case of space ids. The bridge finds the room again from
   the space id through it, so a redelivered `created` reuses the room and
-  announces it again.
+  announces it again. The bridge's registration must reserve these aliases,
+  or Synapse refuses to create the room with `M_EXCLUSIVE`:
+
+  ```yaml
+  namespaces:
+    aliases:
+      - exclusive: true
+        regex: "#twake-space-.*:<domain>"
+  ```
+
 * The bridge bot is the only one at level 100, so membership and settings only
   change through the directory. Editors, admins and TwakeSpace's user are at
   50 and can post. Viewers stay at 0 and only read.
