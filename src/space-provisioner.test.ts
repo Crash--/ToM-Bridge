@@ -34,6 +34,7 @@ const config: SpacesConfig = {
 };
 
 const ROOM = "!space:acme.example";
+const GENERAL = "!general:acme.example";
 const SPACE = "3b9e2c71-5d4a-4f0e-9c8b-1a2d6e7f8091";
 
 const jdoe = {
@@ -160,6 +161,8 @@ describe("createSpaceEventHandler", () => {
   let matrix: {
     findSpace: ReturnType<typeof mock>;
     createSpace: ReturnType<typeof mock>;
+    findGeneral: ReturnType<typeof mock>;
+    ensureGeneral: ReturnType<typeof mock>;
     ensureUser: ReturnType<typeof mock>;
     join: ReturnType<typeof mock>;
     kick: ReturnType<typeof mock>;
@@ -167,6 +170,7 @@ describe("createSpaceEventHandler", () => {
     rename: ReturnType<typeof mock>;
     members: ReturnType<typeof mock>;
     deleteSpace: ReturnType<typeof mock>;
+    closeRoom: ReturnType<typeof mock>;
   };
   let publish: ReturnType<typeof mock>;
   let clock: SpaceClock;
@@ -191,6 +195,8 @@ describe("createSpaceEventHandler", () => {
     matrix = {
       findSpace: mock(async () => ROOM),
       createSpace: mock(async () => ROOM),
+      findGeneral: mock(async () => null),
+      ensureGeneral: mock(async () => GENERAL),
       ensureUser: mock(async () => {}),
       join: mock(async () => {}),
       kick: mock(async () => {}),
@@ -198,6 +204,7 @@ describe("createSpaceEventHandler", () => {
       rename: mock(async () => {}),
       members: mock(async () => []),
       deleteSpace: mock(async () => {}),
+      closeRoom: mock(async () => {}),
     };
     publish = mock(async () => {});
     clock = memoryClock();
@@ -222,12 +229,13 @@ describe("createSpaceEventHandler", () => {
       groups: [],
     });
 
-    it("creates the Matrix space and joins TwakeSpace and the members", async () => {
+    it("creates the Matrix space and its General room, and joins TwakeSpace and the members to both", async () => {
       matrix.findSpace.mockResolvedValue(null);
 
       await handler()(created, properties("created"));
 
       expect(matrix.createSpace).toHaveBeenCalledWith(SPACE, "Design Sprint");
+      expect(matrix.ensureGeneral).toHaveBeenCalledWith(SPACE, ROOM);
       expect(matrix.ensureUser).toHaveBeenCalledWith("@twakespace:acme.example", "TwakeSpace");
       expect(matrix.ensureUser).toHaveBeenCalledWith("@jdoe:acme.example", "John Doe");
       expect(matrix.ensureUser).toHaveBeenCalledWith("@vlee:acme.example", "vlee");
@@ -237,11 +245,23 @@ describe("createSpaceEventHandler", () => {
           "@twakespace:acme.example",
         ],
         [
+          GENERAL,
+          "@twakespace:acme.example",
+        ],
+        [
           ROOM,
           "@jdoe:acme.example",
         ],
         [
+          GENERAL,
+          "@jdoe:acme.example",
+        ],
+        [
           ROOM,
+          "@vlee:acme.example",
+        ],
+        [
+          GENERAL,
           "@vlee:acme.example",
         ],
       ]);
@@ -343,10 +363,13 @@ describe("createSpaceEventHandler", () => {
       await h(created, properties("created"));
 
       expect(matrix.join).not.toHaveBeenCalledWith(ROOM, "@jdoe:acme.example");
-      expect(matrix.setPowerLevels).toHaveBeenLastCalledWith(ROOM, {
-        "@vlee:acme.example": null,
-        "@twakespace:acme.example": 50,
-      });
+      expect(matrix.setPowerLevels.mock.calls.filter(([room]) => room === ROOM).at(-1)).toEqual([
+        ROOM,
+        {
+          "@vlee:acme.example": null,
+          "@twakespace:acme.example": 50,
+        },
+      ]);
     });
   });
 
@@ -364,6 +387,33 @@ describe("createSpaceEventHandler", () => {
       expect(matrix.join).toHaveBeenCalledWith(ROOM, "@jdoe:acme.example");
       expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, {
         "@jdoe:acme.example": 50,
+      });
+    });
+
+    it("adds and removes a member in General too", async () => {
+      matrix.findGeneral.mockResolvedValue(GENERAL);
+      const member = spaceEvent({
+        members: [
+          jdoe,
+        ],
+      });
+
+      await handler()(member, properties("member.added"));
+      await handler()(
+        {
+          ...member,
+          timestamp: "2026-10-06T12:00:00.000Z",
+        },
+        properties("member.removed"),
+      );
+
+      expect(matrix.join).toHaveBeenCalledWith(GENERAL, "@jdoe:acme.example");
+      expect(matrix.setPowerLevels).toHaveBeenCalledWith(GENERAL, {
+        "@jdoe:acme.example": 50,
+      });
+      expect(matrix.kick).toHaveBeenCalledWith(GENERAL, "@jdoe:acme.example");
+      expect(matrix.setPowerLevels).toHaveBeenCalledWith(GENERAL, {
+        "@jdoe:acme.example": null,
       });
     });
 
@@ -509,6 +559,53 @@ describe("createSpaceEventHandler", () => {
       expect(matrix.deleteSpace).not.toHaveBeenCalled();
     });
 
+    it("closes General before removing everyone, so no one joins it again", async () => {
+      matrix.findGeneral.mockResolvedValue(GENERAL);
+      matrix.members.mockResolvedValue([
+        "@jdoe:acme.example",
+      ]);
+
+      await handler()(spaceEvent({}), properties("deleted"));
+
+      expect(matrix.closeRoom.mock.calls).toEqual([
+        [
+          GENERAL,
+        ],
+      ]);
+      expect(matrix.closeRoom.mock.invocationCallOrder[0]!).toBeLessThan(matrix.kick.mock.invocationCallOrder[0]!);
+    });
+
+    it("also removes everyone from General, whoever joined it on their own included", async () => {
+      matrix.findGeneral.mockResolvedValue(GENERAL);
+      matrix.members.mockImplementation(async (roomId: string) =>
+        roomId === GENERAL
+          ? [
+              "@jdoe:acme.example",
+              "@guest:acme.example",
+            ]
+          : [
+              "@jdoe:acme.example",
+            ],
+      );
+
+      await handler()(spaceEvent({}), properties("deleted"));
+
+      expect(matrix.kick.mock.calls).toEqual([
+        [
+          ROOM,
+          "@jdoe:acme.example",
+        ],
+        [
+          GENERAL,
+          "@jdoe:acme.example",
+        ],
+        [
+          GENERAL,
+          "@guest:acme.example",
+        ],
+      ]);
+    });
+
     it("records the deletion of a space without a Matrix space, so a retried created stays out", async () => {
       matrix.findSpace.mockResolvedValue(null);
       const handle = handler();
@@ -587,18 +684,60 @@ describe("createSpaceEventHandler", () => {
 
       await handler()(synced, properties("synced"));
 
-      expect(matrix.rename).toHaveBeenCalledWith(ROOM, "Design Sprint");
+      expect(matrix.rename.mock.calls).toEqual([
+        [
+          ROOM,
+          "Design Sprint",
+        ],
+      ]);
+      expect(matrix.members).toHaveBeenCalledWith(ROOM);
+      expect(matrix.members).not.toHaveBeenCalledWith(GENERAL);
       expect(matrix.kick.mock.calls).toEqual([
+        [
+          GENERAL,
+          "@vlee:acme.example",
+        ],
         [
           ROOM,
           "@vlee:acme.example",
         ],
       ]);
-      expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, {
-        "@jdoe:acme.example": 50,
-        "@vlee:acme.example": null,
-        "@twakespace:acme.example": 50,
-      });
+      for (const room of [
+        ROOM,
+        GENERAL,
+      ]) {
+        expect(matrix.setPowerLevels).toHaveBeenCalledWith(room, {
+          "@jdoe:acme.example": 50,
+          "@vlee:acme.example": null,
+          "@twakespace:acme.example": 50,
+        });
+      }
+    });
+
+    it("still removes from General on a retry after its kick failed", async () => {
+      matrix.members.mockResolvedValue([
+        "@vlee:acme.example",
+      ]);
+      matrix.kick.mockRejectedValueOnce(new Error("Bad Gateway"));
+      const handle = handler();
+
+      await expect(handle(synced, properties("synced"))).rejects.toThrow("Bad Gateway");
+      await handle(synced, properties("synced"));
+
+      expect(matrix.kick.mock.calls).toEqual([
+        [
+          GENERAL,
+          "@vlee:acme.example",
+        ],
+        [
+          GENERAL,
+          "@vlee:acme.example",
+        ],
+        [
+          ROOM,
+          "@vlee:acme.example",
+        ],
+      ]);
     });
 
     it("keeps a member added after the sync read the directory", async () => {
@@ -774,6 +913,7 @@ describe("purgeDeletedSpaces", () => {
     await registry.scheduleDeletion(space("failing"), 1_000);
     await registry.scheduleDeletion(space("later"), 5_000);
     const matrix = {
+      findGeneral: mock(async (spaceId: string) => (spaceId === "due" ? "!due-general:acme.example" : null)),
       deleteSpace: mock((roomId: string) =>
         roomId === "!failing:acme.example" ? Promise.reject(new Error("boom")) : Promise.resolve(),
       ),
@@ -788,7 +928,17 @@ describe("purgeDeletedSpaces", () => {
       2_000,
     );
 
-    expect(matrix.deleteSpace).toHaveBeenCalledTimes(2);
+    expect(matrix.deleteSpace.mock.calls).toEqual([
+      [
+        "!due-general:acme.example",
+      ],
+      [
+        "!due:acme.example",
+      ],
+      [
+        "!failing:acme.example",
+      ],
+    ]);
     expect([
       ...registry.spaces.keys(),
     ]).toEqual([

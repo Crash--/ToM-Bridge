@@ -13,7 +13,7 @@ sequenceDiagram
   participant T as TwakeSpace
   L->>C: space exchange, twake.space.created
   C->>B: cs.instances.out.exchange, twake.space.created.<org>
-  B->>S: create the Matrix space, add the members
+  B->>S: create the Matrix space and its General room, add the members
   B->>T: activity exchange, com.twake.chat.space.provisioned.v1
 ```
 
@@ -74,6 +74,22 @@ their Matrix space without waiting for the night.
 * A member without a Matrix account gets one, named the way the SSO mapping
   names it (`localpartFrom`). For that person to sign in, the homeserver's OIDC
   provider needs `allow_existing_users: true`.
+
+## General
+
+Each Matrix space holds a General room, `#twake-space-<space id>-general`,
+which the space's aliases rule above also covers.
+
+* It is public: anyone on the organization's homeserver can join it, and the
+  room directory does not list it.
+* The bridge adds and removes the space's members, TwakeSpace's user included,
+  in General as in the Matrix space, with the same levels.
+* A sync only removes from General the members it removes from the Matrix
+  space, so someone who joined General on their own stays.
+* Deleting the space makes General invite only, so no one can join it again,
+  then removes everyone from it. General is deleted with the Matrix space.
+* Whoever is not a member of the space reads General but cannot post in it.
+* A Matrix space created without General gets it at its next `synced`.
 
 ## Ordering
 

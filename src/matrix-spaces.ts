@@ -142,7 +142,7 @@ export class MatrixSpaces implements SpaceMatrix {
           },
           ...initial_state,
         ],
-        // Only the bridge changes membership and settings, so the room never drifts from the directory
+        // Only the bridge invites, kicks and changes settings, so the room never drifts from the directory beyond who joins a public one
         power_level_content_override: {
           users: {
             [this.#botUserId]: BRIDGE_LEVEL,
@@ -240,6 +240,12 @@ export class MatrixSpaces implements SpaceMatrix {
     }
     await this.#client.sendStateEvent(roomId, "m.room.name", "", {
       name,
+    });
+  }
+
+  async closeRoom(roomId: string): Promise<void> {
+    await this.#client.sendStateEvent(roomId, "m.room.join_rules", "", {
+      join_rule: "invite",
     });
   }
 

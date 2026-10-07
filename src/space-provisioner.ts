@@ -37,6 +37,9 @@ export interface SpaceMatrix {
   findSpace(spaceId: string): Promise<string | null>;
   /** Creates the space's Matrix space, or returns the one a concurrent delivery created. */
   createSpace(spaceId: string, name: string): Promise<string>;
+  findGeneral(spaceId: string): Promise<string | null>;
+  /** Finds or creates the space's public General room, and makes sure the Matrix space lists it. */
+  ensureGeneral(spaceId: string, spaceRoomId: string): Promise<string>;
   ensureUser(matrixId: string, displayName: string): Promise<void>;
   join(roomId: string, matrixId: string): Promise<void>;
   /** Removes a member, doing nothing when they are not in the room. */
@@ -44,6 +47,8 @@ export interface SpaceMatrix {
   /** Sets each user's power level, null taking it back to the default. */
   setPowerLevels(roomId: string, levels: Record<string, number | null>): Promise<void>;
   rename(roomId: string, name: string): Promise<void>;
+  /** Lets no one join without an invite. */
+  closeRoom(roomId: string): Promise<void>;
   /** The joined and invited members, the bridge bot left out. */
   members(roomId: string): Promise<string[]>;
   /** Deletes the room and purges its history, doing nothing when it is gone. */
@@ -209,19 +214,47 @@ export function createSpaceEventHandler({
     });
   }
 
-  async function addMembers(roomId: string, spaceId: string, members: NamedMember[], timestamp: number) {
+  /** The Matrix space, then its General room when it has one. */
+  async function roomsOf(spaceId: string, spaceRoomId: string): Promise<string[]> {
+    const general = await matrix.findGeneral(spaceId);
+    return general
+      ? [
+          spaceRoomId,
+          general,
+        ]
+      : [
+          spaceRoomId,
+        ];
+  }
+
+  async function addMembers(rooms: string[], spaceId: string, members: NamedMember[], timestamp: number) {
     const levels: Record<string, number | null> = {};
     for (const member of members) {
       const { matrixId } = member;
       const applied = await unlessStale(`${spaceId}/${matrixId}`, timestamp, async () => {
         await matrix.ensureUser(matrixId, displayNameOf(member));
-        await matrix.join(roomId, matrixId);
+        for (const roomId of rooms) {
+          await matrix.join(roomId, matrixId);
+        }
       });
       if (applied) {
         levels[matrixId] = levelOf(member.role);
       }
     }
     return levels;
+  }
+
+  async function kickEverywhere(rooms: string[], matrixId: string) {
+    // The Matrix space last: a sync finds who to remove there, so a retry still finds who General kept
+    for (const roomId of rooms.toReversed()) {
+      await matrix.kick(roomId, matrixId);
+    }
+  }
+
+  async function setLevels(rooms: string[], levels: Record<string, number | null>) {
+    for (const roomId of rooms) {
+      await matrix.setPowerLevels(roomId, levels);
+    }
   }
 
   async function requireSpace(spaceId: string): Promise<string> {
@@ -233,12 +266,16 @@ export function createSpaceEventHandler({
     return roomId;
   }
 
-  /** Removes the members a sync no longer lists, unless they were added after it. */
-  async function removeUnlisted(roomId: string, spaceId: string, listed: Set<string>, timestamp: number) {
+  /**
+   * Removes the members a sync no longer lists, unless they were added after
+   * it. Read from the Matrix space: General is public, so whoever joined it on
+   * their own stays.
+   */
+  async function removeUnlisted(rooms: string[], spaceId: string, listed: Set<string>, timestamp: number) {
     const levels: Record<string, number | null> = {};
-    for (const matrixId of await matrix.members(roomId)) {
+    for (const matrixId of await matrix.members(rooms[0]!)) {
       if (listed.has(matrixId) || matrixId === twakeSpaceUserId) continue;
-      if (await unlessStale(`${spaceId}/${matrixId}`, timestamp, () => matrix.kick(roomId, matrixId))) {
+      if (await unlessStale(`${spaceId}/${matrixId}`, timestamp, () => kickEverywhere(rooms, matrixId))) {
         levels[matrixId] = null;
       }
     }
@@ -263,18 +300,25 @@ export function createSpaceEventHandler({
       await unlessStale(`${spaceId}/name`, timestamp, () => matrix.rename(roomId, name));
     }
 
+    const rooms = [
+      roomId,
+      await matrix.ensureGeneral(spaceId, roomId),
+    ];
+
     // An app service user only exists once its app service registers it, which TwakeSpace may not have done yet
     await matrix.ensureUser(twakeSpaceUserId, "TwakeSpace");
-    await matrix.join(roomId, twakeSpaceUserId);
+    for (const room of rooms) {
+      await matrix.join(room, twakeSpaceUserId);
+    }
     const members = named(membersOf(message));
-    const levels = await addMembers(roomId, spaceId, members, timestamp);
+    const levels = await addMembers(rooms, spaceId, members, timestamp);
     if (whole) {
       Object.assign(
         levels,
-        await removeUnlisted(roomId, spaceId, new Set(members.map((member) => member.matrixId)), timestamp),
+        await removeUnlisted(rooms, spaceId, new Set(members.map((member) => member.matrixId)), timestamp),
       );
     }
-    await matrix.setPowerLevels(roomId, {
+    await setLevels(rooms, {
       ...levels,
       [twakeSpaceUserId]: POSTER_LEVEL,
     });
@@ -314,28 +358,34 @@ export function createSpaceEventHandler({
   }
 
   async function onMemberChanged(message: Record<string, unknown>, spaceId: string, timestamp: number) {
-    const roomId = await requireSpace(spaceId);
-    const levels = await addMembers(roomId, spaceId, named(membersOf(message)), timestamp);
-    await matrix.setPowerLevels(roomId, levels);
+    const rooms = await roomsOf(spaceId, await requireSpace(spaceId));
+    await setLevels(rooms, await addMembers(rooms, spaceId, named(membersOf(message)), timestamp));
   }
 
   async function onMemberRemoved(message: Record<string, unknown>, spaceId: string, timestamp: number) {
-    const roomId = await requireSpace(spaceId);
+    const rooms = await roomsOf(spaceId, await requireSpace(spaceId));
     const levels: Record<string, number | null> = {};
     for (const { matrixId } of named(membersOf(message))) {
-      if (await unlessStale(`${spaceId}/${matrixId}`, timestamp, () => matrix.kick(roomId, matrixId))) {
+      if (await unlessStale(`${spaceId}/${matrixId}`, timestamp, () => kickEverywhere(rooms, matrixId))) {
         levels[matrixId] = null;
       }
     }
-    await matrix.setPowerLevels(roomId, levels);
+    await setLevels(rooms, levels);
   }
 
-  /** Removes every member at once, and keeps the Matrix space until its deletion is due. */
+  /** Removes everyone at once, General included, and keeps the rooms until their deletion is due. */
   async function removeAccess(space: KnownSpace, deletedAt: number) {
     const { roomId } = space;
     if (roomId) {
-      for (const matrixId of await matrix.members(roomId)) {
-        await matrix.kick(roomId, matrixId);
+      const rooms = await roomsOf(space.spaceId, roomId);
+      if (rooms[1]) {
+        // Being public, General would otherwise let whoever is removed join it again until it is purged
+        await matrix.closeRoom(rooms[1]);
+      }
+      for (const room of rooms) {
+        for (const matrixId of await matrix.members(room)) {
+          await matrix.kick(room, matrixId);
+        }
       }
     }
     await registry.scheduleDeletion(space, deletedAt + RETENTION_MS);
@@ -444,14 +494,18 @@ export async function purgeDeletedSpaces(
 ): Promise<void> {
   for (const space of await registry.dueBy(now)) {
     try {
+      const general = await matrix.findGeneral(space.spaceId);
+      if (general) {
+        await matrix.deleteSpace(general);
+      }
       if (space.roomId) {
         await matrix.deleteSpace(space.roomId);
       }
       await registry.forget(space.spaceId);
-      log.info(`Deleted the Matrix space ${space.roomId} of space ${space.spaceId}`);
+      log.info(`Deleted the rooms of space ${space.spaceId}`);
     } catch (error) {
       log.warn(
-        `Could not delete the Matrix space ${space.roomId}: ${error instanceof Error ? error.message : String(error)}`,
+        `Could not delete the rooms of space ${space.spaceId}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }

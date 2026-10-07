@@ -229,6 +229,14 @@ describe("MatrixSpaces", () => {
     });
   });
 
+  it("closes a room to anyone without an invite", async () => {
+    await spaces.closeRoom(ROOM);
+
+    expect(client.sendStateEvent).toHaveBeenCalledWith(ROOM, "m.room.join_rules", "", {
+      join_rule: "invite",
+    });
+  });
+
   it("lists the joined and invited members without the bridge bot", async () => {
     client.getRoomMembers.mockResolvedValue([
       {
