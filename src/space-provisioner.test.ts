@@ -1,0 +1,334 @@
+import { beforeEach, describe, expect, it, mock } from "bun:test";
+
+import type { Logger } from "matrix-appservice-bridge";
+
+import type { RabbitMQMessageProperties } from "@linagora/rabbitmq-client";
+
+import { createSpaceEventHandler, eventName, PROVISIONED_TYPE, type SpaceClock } from "./space-provisioner";
+import type { SpacesConfig } from "./types";
+
+const log = {
+  info: mock(),
+  warn: mock(),
+  error: mock(),
+  debug: mock(),
+} as unknown as Logger;
+
+const config: SpacesConfig = {
+  exchange: "cs.instances.out.exchange",
+  queue: "chat.space.acme.queue",
+  routingKey: "twake.space.#.acme",
+  activityExchange: "activity",
+  localpartFrom: "uid",
+};
+
+const ROOM = "!space:acme.example";
+const SPACE = "3b9e2c71-5d4a-4f0e-9c8b-1a2d6e7f8091";
+
+const jdoe = {
+  uuid: "6f1c0a52-8e3b-4d7f-a9c2-5b0e1d4f7a83",
+  username: "jdoe",
+  email: "John.Doe@acme.example",
+  firstName: "John",
+  lastName: "Doe",
+  role: "editor",
+};
+
+const viewer = {
+  uuid: "0d7e3b1a-2c4f-4e5a-8b9c-1f2e3d4c5b6a",
+  username: "vlee",
+  email: "vlee@acme.example",
+  role: "viewer",
+};
+
+function properties(event: string): RabbitMQMessageProperties {
+  return {
+    exchange: "cs.instances.out.exchange",
+    routingKey: `twake.space.${event}.acme`,
+    headers: {},
+  };
+}
+
+function spaceEvent(fields: Record<string, unknown>) {
+  return {
+    organizationId: "acme",
+    id: SPACE,
+    actor: "jsmith",
+    timestamp: "2026-10-06T09:12:44.512Z",
+    ...fields,
+  };
+}
+
+function memoryClock(): SpaceClock {
+  const applied = new Map<string, number>();
+  return {
+    latest: (key) => Promise.resolve(applied.get(key) ?? null),
+    record: (key, timestamp) => {
+      applied.set(key, timestamp);
+      return Promise.resolve();
+    },
+  };
+}
+
+describe("eventName", () => {
+  it.each([
+    [
+      "twake.space.created.acme",
+      "created",
+    ],
+    [
+      "twake.space.member.role.changed.acme",
+      "member.role.changed",
+    ],
+    [
+      "twake.space.member.added",
+      "member.added",
+    ],
+  ])("reads %p as %p", (routingKey, name) => {
+    expect(eventName(routingKey, "acme")).toBe(name);
+  });
+});
+
+describe("createSpaceEventHandler", () => {
+  let matrix: {
+    findSpace: ReturnType<typeof mock>;
+    createSpace: ReturnType<typeof mock>;
+    ensureUser: ReturnType<typeof mock>;
+    join: ReturnType<typeof mock>;
+    kick: ReturnType<typeof mock>;
+    setPowerLevels: ReturnType<typeof mock>;
+    rename: ReturnType<typeof mock>;
+  };
+  let publish: ReturnType<typeof mock>;
+  let clock: SpaceClock;
+
+  function handler(overrides: Partial<SpacesConfig> = {}) {
+    return createSpaceEventHandler({
+      matrix,
+      clock,
+      publish,
+      domain: "acme.example",
+      config: {
+        ...config,
+        ...overrides,
+      },
+      log,
+    });
+  }
+
+  beforeEach(() => {
+    matrix = {
+      findSpace: mock(async () => ROOM),
+      createSpace: mock(async () => ROOM),
+      ensureUser: mock(async () => {}),
+      join: mock(async () => {}),
+      kick: mock(async () => {}),
+      setPowerLevels: mock(async () => {}),
+      rename: mock(async () => {}),
+    };
+    publish = mock(async () => {});
+    clock = memoryClock();
+  });
+
+  it("refuses an unknown localpartFrom", () => {
+    expect(() =>
+      handler({
+        localpartFrom: "cn" as "uid",
+      }),
+    ).toThrow("spaces.localpartFrom");
+  });
+
+  describe("created", () => {
+    const created = spaceEvent({
+      name: "Design Sprint",
+      members: [
+        jdoe,
+        viewer,
+      ],
+      groups: [],
+    });
+
+    it("creates the Matrix space and joins TwakeSpace and the members", async () => {
+      matrix.findSpace.mockResolvedValue(null);
+
+      await handler()(created, properties("created"));
+
+      expect(matrix.createSpace).toHaveBeenCalledWith(SPACE, "Design Sprint");
+      expect(matrix.ensureUser).toHaveBeenCalledWith("@jdoe:acme.example", "John Doe");
+      expect(matrix.ensureUser).toHaveBeenCalledWith("@vlee:acme.example", "vlee");
+      expect(matrix.join.mock.calls).toEqual([
+        [
+          ROOM,
+          "@twake-space:acme.example",
+        ],
+        [
+          ROOM,
+          "@jdoe:acme.example",
+        ],
+        [
+          ROOM,
+          "@vlee:acme.example",
+        ],
+      ]);
+    });
+
+    it("lets editors, admins and TwakeSpace post, and viewers only read", async () => {
+      await handler()(created, properties("created"));
+
+      expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, {
+        "@jdoe:acme.example": 50,
+        "@vlee:acme.example": null,
+        "@twake-space:acme.example": 50,
+      });
+    });
+
+    it("names accounts after the email when the homeserver does", async () => {
+      await handler({
+        localpartFrom: "email",
+      })(created, properties("created"));
+
+      expect(matrix.join).toHaveBeenCalledWith(ROOM, "@john.doe:acme.example");
+    });
+
+    it("leaves out a member it cannot name and adds the others", async () => {
+      await handler({
+        localpartFrom: "email",
+      })(
+        {
+          ...created,
+          members: [
+            {
+              ...jdoe,
+              uuid: "u-no-email",
+              email: "nodomain",
+            },
+            jdoe,
+          ],
+        },
+        properties("created"),
+      );
+
+      expect(matrix.join).toHaveBeenCalledWith(ROOM, "@john.doe:acme.example");
+      expect(matrix.join).not.toHaveBeenCalledWith(ROOM, "@nodomai:acme.example");
+      expect(publish).toHaveBeenCalled();
+    });
+
+    it("joins the configured TwakeSpace user", async () => {
+      await handler({
+        twakeSpaceUserId: "@feed:acme.example",
+      })(created, properties("created"));
+
+      expect(matrix.join).toHaveBeenCalledWith(ROOM, "@feed:acme.example");
+    });
+
+    it("announces the Matrix space on the activity exchange", async () => {
+      await handler()(created, properties("created"));
+
+      expect(publish).toHaveBeenCalledTimes(1);
+      const [type, event] = publish.mock.calls[0]!;
+      expect(type).toBe(PROVISIONED_TYPE);
+      expect(event).toMatchObject({
+        specversion: "1.0",
+        source: "twake://chat",
+        type: PROVISIONED_TYPE,
+        twakeorg: "acme",
+        data: {
+          space_id: SPACE,
+          resource: {
+            kind: "matrix_space",
+            id: ROOM,
+          },
+        },
+      });
+    });
+
+    it("reuses the Matrix space on a redelivery and announces it again", async () => {
+      await handler()(created, properties("created"));
+
+      expect(matrix.createSpace).not.toHaveBeenCalled();
+      expect(publish).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves out a member whose role changed after the space was created", async () => {
+      const h = handler();
+      await h(
+        spaceEvent({
+          timestamp: "2026-10-06T10:00:00.000Z",
+          members: [
+            {
+              ...jdoe,
+              role: "viewer",
+            },
+          ],
+        }),
+        properties("member.role.changed"),
+      );
+      matrix.join.mockClear();
+
+      await h(created, properties("created"));
+
+      expect(matrix.join).not.toHaveBeenCalledWith(ROOM, "@jdoe:acme.example");
+      expect(matrix.setPowerLevels).toHaveBeenLastCalledWith(ROOM, {
+        "@vlee:acme.example": null,
+        "@twake-space:acme.example": 50,
+      });
+    });
+  });
+
+  it("renames the Matrix space", async () => {
+    await handler()(
+      spaceEvent({
+        name: "Launch",
+      }),
+      properties("updated"),
+    );
+
+    expect(matrix.rename).toHaveBeenCalledWith(ROOM, "Launch");
+  });
+
+  it("ignores group events", async () => {
+    await handler()(
+      spaceEvent({
+        groups: [
+          {
+            id: "g1",
+            name: "Design",
+            role: "editor",
+          },
+        ],
+      }),
+      properties("group.linked"),
+    );
+
+    expect(matrix.findSpace).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "no organization",
+      spaceEvent({
+        organizationId: undefined,
+      }),
+    ],
+    [
+      "no space id",
+      spaceEvent({
+        id: undefined,
+      }),
+    ],
+    [
+      "a timestamp that is not a date",
+      spaceEvent({
+        timestamp: "yesterday",
+      }),
+    ],
+    [
+      "no members",
+      spaceEvent({}),
+    ],
+  ])("drops an event with %s instead of retrying it", async (_, event) => {
+    await handler()(event, properties("member.added"));
+
+    expect(matrix.join).not.toHaveBeenCalled();
+  });
+});
