@@ -168,8 +168,37 @@ export class MatrixSpaces implements SpaceMatrix {
   }
 
   async rename(roomId: string, name: string): Promise<void> {
+    // Every sync renames, so an unchanged name sends nothing
+    const current = await this.#client.getRoomStateEvent(roomId, "m.room.name", "").catch((error: unknown) => {
+      if (isNotFound(error)) return null;
+      throw error;
+    });
+    if (current?.name === name) {
+      return;
+    }
     await this.#client.sendStateEvent(roomId, "m.room.name", "", {
       name,
     });
+  }
+
+  async members(roomId: string): Promise<string[]> {
+    const members = await this.#client.getRoomMembers(roomId, undefined, [
+      "join",
+      "invite",
+    ]);
+    return members.map((member) => member.membershipFor).filter((matrixId) => matrixId !== this.#botUserId);
+  }
+
+  async deleteSpace(roomId: string): Promise<void> {
+    try {
+      // Deleting also removes the room's aliases, and runs in the background on the homeserver
+      await this.#client.doRequest("DELETE", `/_synapse/admin/v2/rooms/${encodeURIComponent(roomId)}`, null, {
+        purge: true,
+      });
+    } catch (error) {
+      if (!isNotFound(error)) {
+        throw error;
+      }
+    }
   }
 }

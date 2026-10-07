@@ -22,6 +22,7 @@ describe("MatrixSpaces", () => {
     getRoomStateEvent: ReturnType<typeof mock>;
     sendStateEvent: ReturnType<typeof mock>;
     kickUser: ReturnType<typeof mock>;
+    getRoomMembers: ReturnType<typeof mock>;
   };
   let spaces: MatrixSpaces;
 
@@ -33,6 +34,7 @@ describe("MatrixSpaces", () => {
       getRoomStateEvent: mock(async () => ({})),
       sendStateEvent: mock(async () => "$event"),
       kickUser: mock(async () => {}),
+      getRoomMembers: mock(async () => []),
     };
     spaces = new MatrixSpaces(client as unknown as MatrixClient, "@bot:acme.example", "acme.example");
   });
@@ -161,5 +163,48 @@ describe("MatrixSpaces", () => {
     });
 
     expect(client.sendStateEvent).not.toHaveBeenCalled();
+  });
+
+  it("renames only when the name changed", async () => {
+    client.getRoomStateEvent.mockResolvedValue({
+      name: "Design Sprint",
+    });
+
+    await spaces.rename(ROOM, "Design Sprint");
+    expect(client.sendStateEvent).not.toHaveBeenCalled();
+
+    await spaces.rename(ROOM, "Design Review");
+    expect(client.sendStateEvent).toHaveBeenCalledWith(ROOM, "m.room.name", "", {
+      name: "Design Review",
+    });
+  });
+
+  it("lists the joined and invited members without the bridge bot", async () => {
+    client.getRoomMembers.mockResolvedValue([
+      {
+        membershipFor: "@bot:acme.example",
+      },
+      {
+        membershipFor: "@jdoe:acme.example",
+      },
+    ]);
+
+    expect(await spaces.members(ROOM)).toEqual([
+      "@jdoe:acme.example",
+    ]);
+    expect(client.getRoomMembers).toHaveBeenCalledWith(ROOM, undefined, [
+      "join",
+      "invite",
+    ]);
+  });
+
+  it("deletes and purges a space, and takes an unknown one as deleted", async () => {
+    await spaces.deleteSpace(ROOM);
+    expect(client.doRequest).toHaveBeenCalledWith("DELETE", "/_synapse/admin/v2/rooms/!space%3Aacme.example", null, {
+      purge: true,
+    });
+
+    client.doRequest.mockRejectedValue(matrixError(404, "M_NOT_FOUND"));
+    await spaces.deleteSpace(ROOM);
   });
 });
