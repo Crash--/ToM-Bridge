@@ -52,6 +52,13 @@ the message broker. The reference blocks are:
   `localpartFrom` is one of the two values. A message that names
   no account, or a Synapse failure, ends in the dead-letter queue after the
   retries.
+* **`spaces`** (optional) - where space events arrive (`exchange`,
+  `routingKey`, `queue`), where the bridge announces each space's Matrix space
+  (`activityExchange`), how the homeserver's SSO mapping named accounts
+  (`localpartFrom`: `uid` for the member's `username`, `email` for the local
+  part of their `email`), and TwakeSpace's app service user
+  (`twakeSpaceUserId`, `@twake-space:<domain>` by default). See
+  [Spaces](Spaces.md).
 
 ## Passing the Files to the Service
 

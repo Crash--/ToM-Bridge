@@ -151,9 +151,9 @@ export interface BridgeConfig {
 }
 
 /**
- * Type literal for the user settings database table name.
+ * Type literal for the bridge's database table names.
  */
-export type UserSettingsTableName = "usersettings";
+export type UserSettingsTableName = "usersettings" | "spaceclock";
 
 /**
  * Minimal logger interface for creating adapters.
