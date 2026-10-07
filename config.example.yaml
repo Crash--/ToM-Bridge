@@ -69,5 +69,5 @@ rabbitmq:
 #   # What the homeserver's SSO mapping named accounts after: 'uid' (the
 #   # member's username) or 'email' (the local part of their email)
 #   localpartFrom: 'uid'
-#   # TwakeSpace's app service user (default: '@twake-space:<domain>')
-#   # twakeSpaceUserId: '@twake-space:example.com'
+#   # TwakeSpace's app service user (default: '@twakespace:<domain>')
+#   # twakeSpaceUserId: '@twakespace:example.com'

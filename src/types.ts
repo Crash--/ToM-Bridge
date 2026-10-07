@@ -130,7 +130,7 @@ export interface SpacesConfig {
   readonly routingKey: string;
   readonly activityExchange: string;
   readonly localpartFrom: "uid" | "email";
-  /** TwakeSpace's app service user, which posts the feed. Default: `@twake-space:<domain>` */
+  /** TwakeSpace's app service user, which posts the feed. Default: `@twakespace:<domain>` */
   readonly twakeSpaceUserId?: string;
 }
 

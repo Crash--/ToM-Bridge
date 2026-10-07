@@ -154,13 +154,13 @@ describe("createSpaceEventHandler", () => {
       await handler()(created, properties("created"));
 
       expect(matrix.createSpace).toHaveBeenCalledWith(SPACE, "Design Sprint");
-      expect(matrix.ensureUser).toHaveBeenCalledWith("@twake-space:acme.example", "TwakeSpace");
+      expect(matrix.ensureUser).toHaveBeenCalledWith("@twakespace:acme.example", "TwakeSpace");
       expect(matrix.ensureUser).toHaveBeenCalledWith("@jdoe:acme.example", "John Doe");
       expect(matrix.ensureUser).toHaveBeenCalledWith("@vlee:acme.example", "vlee");
       expect(matrix.join.mock.calls).toEqual([
         [
           ROOM,
-          "@twake-space:acme.example",
+          "@twakespace:acme.example",
         ],
         [
           ROOM,
@@ -179,7 +179,7 @@ describe("createSpaceEventHandler", () => {
       expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, {
         "@jdoe:acme.example": 50,
         "@vlee:acme.example": null,
-        "@twake-space:acme.example": 50,
+        "@twakespace:acme.example": 50,
       });
     });
 
@@ -271,7 +271,7 @@ describe("createSpaceEventHandler", () => {
       expect(matrix.join).not.toHaveBeenCalledWith(ROOM, "@jdoe:acme.example");
       expect(matrix.setPowerLevels).toHaveBeenLastCalledWith(ROOM, {
         "@vlee:acme.example": null,
-        "@twake-space:acme.example": 50,
+        "@twakespace:acme.example": 50,
       });
     });
   });

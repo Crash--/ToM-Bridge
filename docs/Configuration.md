@@ -61,7 +61,7 @@ the message broker. The reference blocks are:
   (`activityExchange`), how the homeserver's SSO mapping named accounts
   (`localpartFrom`: `uid` for the member's `username`, `email` for the local
   part of their `email`), and TwakeSpace's app service user
-  (`twakeSpaceUserId`, `@twake-space:<domain>` by default). See
+  (`twakeSpaceUserId`, `@twakespace:<domain>` by default). See
   [Spaces](Spaces.md).
 
 ## Passing the Files to the Service

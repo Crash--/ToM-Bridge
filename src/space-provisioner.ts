@@ -124,7 +124,7 @@ export function createSpaceEventHandler({
     throw new Error(`spaces.localpartFrom must be "uid" or "email", got ${JSON.stringify(config.localpartFrom)}`);
   }
 
-  const twakeSpaceUserId = config.twakeSpaceUserId ?? `@twake-space:${domain}`;
+  const twakeSpaceUserId = config.twakeSpaceUserId ?? `@twakespace:${domain}`;
 
   /** Null for a member the SSO mapping cannot name, who is left out instead of the whole event. */
   function matrixIdOf(member: SpaceMember): string | null {
