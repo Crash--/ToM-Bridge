@@ -10,6 +10,8 @@ export const POSTER_LEVEL = 50;
 
 export const PROVISIONED_TYPE = "com.twake.chat.space.provisioned.v1";
 
+export const SYNC_REQUESTED = "twake.space.sync.requested";
+
 /** How long a deleted space's Matrix space is kept, without members, before it is purged. */
 export const RETENTION_MS: number = 30 * 24 * 60 * 60 * 1000;
 
@@ -70,6 +72,8 @@ export interface SpaceRegistry {
   spacesOf(organizationId: string): Promise<KnownSpace[]>;
   dueBy(time: number): Promise<KnownSpace[]>;
   forget(spaceId: string): Promise<void>;
+  /** Whether the bridge knows a space of the organization, or of any when omitted. Null without the database. */
+  hasSpaces(organizationId?: string): Promise<boolean | null>;
 }
 
 /**
@@ -451,4 +455,32 @@ export async function purgeDeletedSpaces(
       );
     }
   }
+}
+
+/**
+ * Asks the directory for a sync while the bridge knows no space, so the spaces
+ * created before chat was deployed get a Matrix space. Called once subscribed,
+ * or the synced events would reach no queue. Without the database, the nightly
+ * sync does it.
+ */
+export async function requestFirstSync({
+  registry,
+  publish,
+  organizationId,
+  log,
+}: Pick<Deps, "registry" | "publish" | "log"> & {
+  readonly organizationId?: string;
+}): Promise<void> {
+  if ((await registry.hasSpaces(organizationId)) !== false) {
+    return;
+  }
+  await publish(SYNC_REQUESTED, {
+    ...(organizationId
+      ? {
+          organizationId,
+        }
+      : {}),
+    timestamp: new Date().toISOString(),
+  });
+  log.info(`Requested a sync of ${organizationId ?? "every organization"}`);
 }

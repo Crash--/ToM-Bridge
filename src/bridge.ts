@@ -17,6 +17,7 @@ import {
   createSpaceEventHandler,
   type KnownSpace,
   purgeDeletedSpaces,
+  requestFirstSync,
   type SpaceClock,
   type SpaceRegistry,
 } from "./space-provisioner";
@@ -565,6 +566,15 @@ export class CommonSettingsBridge {
         requireDatabase();
         await this.#db.deleteEqual("spaces", "space_id", spaceId);
       },
+      hasSpaces: async (organizationId) => {
+        if (!this.#isDatabaseAvailable) return null;
+        const rows = organizationId
+          ? await this.#db.get("spaces", fields, {
+              organization_id: organizationId,
+            })
+          : await this.#db.getAll("spaces", fields);
+        return rows.length > 0;
+      },
     };
   }
 
@@ -745,6 +755,19 @@ export class CommonSettingsBridge {
           };
           purge();
           this.#purgeTimer = setInterval(purge, PURGE_INTERVAL_MS).unref();
+
+          const { syncRequestExchange } = spaces;
+          if (syncRequestExchange) {
+            await requestFirstSync({
+              registry,
+              publish: (routingKey, message) =>
+                this.#client.publish(syncRequestExchange, routingKey, message, {
+                  messageId: crypto.randomUUID(),
+                }),
+              organizationId: spaces.organizationId,
+              log: this.#log,
+            });
+          }
         }
       } catch (subscribeError) {
         // Roll the connection back so the lib's auto-reconnect loop doesn't

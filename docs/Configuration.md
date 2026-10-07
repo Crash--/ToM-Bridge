@@ -61,7 +61,9 @@ the message broker. The reference blocks are:
   (`activityExchange`), how the homeserver's SSO mapping named accounts
   (`localpartFrom`: `uid` for the member's `username`, `email` for the local
   part of their `email`), and TwakeSpace's app service user
-  (`twakeSpaceUserId`, `@twakespace:<domain>` by default). See
+  (`twakeSpaceUserId`, `@twakespace:<domain>` by default). With
+  `syncRequestExchange`, the bridge requests a sync of the directory while it
+  knows no space, for `organizationId` or for every organization. See
   [Spaces](Spaces.md).
 
 ## Passing the Files to the Service

@@ -11,8 +11,10 @@ import {
   PROVISIONED_TYPE,
   purgeDeletedSpaces,
   RETENTION_MS,
+  requestFirstSync,
   type SpaceClock,
   type SpaceRegistry,
+  SYNC_REQUESTED,
 } from "./space-provisioner";
 import type { SpacesConfig } from "./types";
 
@@ -126,6 +128,12 @@ function memoryRegistry(): SpaceRegistry & {
       spaces.delete(spaceId);
       return Promise.resolve();
     },
+    hasSpaces: (organizationId) =>
+      Promise.resolve(
+        [
+          ...spaces.values(),
+        ].some((space) => !organizationId || space.organizationId === organizationId),
+      ),
   };
 }
 
@@ -688,6 +696,68 @@ describe("createSpaceEventHandler", () => {
 
       expect(await registry.deletionOf("gone")).toBeNull();
     });
+  });
+});
+
+describe("requestFirstSync", () => {
+  it("requests a sync of the organization while the bridge knows none of its spaces", async () => {
+    const registry = memoryRegistry();
+    const publish = mock(() => Promise.resolve());
+
+    await requestFirstSync({
+      registry,
+      publish,
+      organizationId: "acme",
+      log,
+    });
+
+    expect(publish).toHaveBeenCalledWith(SYNC_REQUESTED, {
+      organizationId: "acme",
+      timestamp: expect.any(String),
+    });
+  });
+
+  it("requests a sync of every organization when none is configured", async () => {
+    const publish = mock(() => Promise.resolve());
+
+    await requestFirstSync({
+      registry: memoryRegistry(),
+      publish,
+      log,
+    });
+
+    expect(publish).toHaveBeenCalledWith(SYNC_REQUESTED, {
+      timestamp: expect.any(String),
+    });
+  });
+
+  it("requests nothing once it knows a space, or without the database", async () => {
+    const registry = memoryRegistry();
+    await registry.remember({
+      spaceId: "known",
+      organizationId: "acme",
+      roomId: ROOM,
+      timestamp: 0,
+    });
+    const publish = mock(() => Promise.resolve());
+
+    await requestFirstSync({
+      registry,
+      publish,
+      organizationId: "acme",
+      log,
+    });
+    await requestFirstSync({
+      registry: {
+        ...memoryRegistry(),
+        hasSpaces: () => Promise.resolve(null),
+      },
+      publish,
+      organizationId: "acme",
+      log,
+    });
+
+    expect(publish).not.toHaveBeenCalled();
   });
 });
 

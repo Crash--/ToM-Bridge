@@ -550,6 +550,32 @@ describe("CommonSettingsBridge", () => {
         expect(mockDatabase.deleteEqual).toHaveBeenCalledWith("spaces", "space_id", "gone");
       });
 
+      it("requests a sync of its organization once subscribed, while it knows no space", async () => {
+        await new CommonSettingsBridge({
+          ...mockConfig,
+          spaces: {
+            ...spaces,
+            syncRequestExchange: "space",
+            organizationId: "acme",
+          },
+        }).start();
+
+        expect(mockClient.publish).toHaveBeenCalledWith(
+          "space",
+          "twake.space.sync.requested",
+          {
+            organizationId: "acme",
+            timestamp: expect.any(String),
+          },
+          {
+            messageId: expect.any(String),
+          },
+        );
+        expect(mockClient.subscribe.mock.invocationCallOrder.at(-1)).toBeLessThan(
+          mockClient.publish.mock.invocationCallOrder[0]!,
+        );
+      });
+
       it("refuses to start when the bot is not a server admin", async () => {
         mockAdminApis.isSelfAdmin.mockResolvedValueOnce(false);
 

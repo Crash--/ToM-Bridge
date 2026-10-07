@@ -46,6 +46,12 @@ ldap-rest publishes `synced` and `sync.completed` for every organization each
 night, and on request
 ([linagora/ldap-rest@32f96d0](https://github.com/linagora/ldap-rest/blob/32f96d0f1314543f6d5bb913d1d6d8ac70bdc697/src/plugins/twake/spaces.ts)).
 
+With `syncRequestExchange` set, the bridge requests a sync when it starts and
+knows no space yet, which is the case at its first deployment. It publishes
+`twake.space.sync.requested` on that exchange once subscribed, so the `synced`
+events find its queue. The spaces created before chat was deployed then get
+their Matrix space without waiting for the night.
+
 ## The Matrix space
 
 * It is unencrypted, so the bridge and TwakeSpace can read it.

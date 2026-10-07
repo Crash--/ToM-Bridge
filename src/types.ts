@@ -132,6 +132,10 @@ export interface SpacesConfig {
   readonly localpartFrom: "uid" | "email";
   /** TwakeSpace's app service user, which posts the feed. Default: `@twakespace:<domain>` */
   readonly twakeSpaceUserId?: string;
+  /** The directory's space exchange, where the bridge requests a sync while it knows no space. Off when omitted. */
+  readonly syncRequestExchange?: string;
+  /** The organization the sync request names. Every organization when omitted, for a homeserver they share. */
+  readonly organizationId?: string;
 }
 
 /**
