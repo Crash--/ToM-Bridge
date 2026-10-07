@@ -26,9 +26,9 @@ function isNotFound(error: unknown): boolean {
  * The bridge's Matrix spaces on one homeserver, managed by the bridge bot,
  * which must be a server admin to create accounts and join members.
  *
- * Each Matrix space carries the alias `#twake-space-<space id>`, which finds it
- * again from the space id, and which only one of two concurrent creations
- * gets.
+ * Each Matrix space carries the alias `#twake-space-<space id>`, and its General
+ * room `#twake-space-<space id>-general`. The alias finds the room again from
+ * the space id, and only one of two concurrent creations gets it.
  */
 export class MatrixSpaces implements SpaceMatrix {
   readonly #client: MatrixClient;
@@ -46,13 +46,9 @@ export class MatrixSpaces implements SpaceMatrix {
     return `twake-space-${spaceId.toLowerCase()}`;
   }
 
-  #alias(spaceId: string): string {
-    return `#${this.#aliasName(spaceId)}:${this.#domain}`;
-  }
-
-  async findSpace(spaceId: string): Promise<string | null> {
+  async #resolve(aliasName: string): Promise<string | null> {
     try {
-      return await this.#client.resolveRoom(this.#alias(spaceId));
+      return await this.#client.resolveRoom(`#${aliasName}:${this.#domain}`);
     } catch (error) {
       if (isNotFound(error)) {
         return null;
@@ -61,16 +57,81 @@ export class MatrixSpaces implements SpaceMatrix {
     }
   }
 
-  async createSpace(spaceId: string, name: string): Promise<string> {
+  findSpace(spaceId: string): Promise<string | null> {
+    return this.#resolve(this.#aliasName(spaceId));
+  }
+
+  findGeneral(spaceId: string): Promise<string | null> {
+    return this.#resolve(`${this.#aliasName(spaceId)}-general`);
+  }
+
+  createSpace(spaceId: string, name: string): Promise<string> {
+    return this.#createRoom(this.#aliasName(spaceId), {
+      name,
+      preset: "private_chat",
+      creation_content: {
+        type: "m.space",
+      },
+    });
+  }
+
+  async ensureGeneral(spaceId: string, spaceRoomId: string): Promise<string> {
+    const via = [
+      this.#domain,
+    ];
+    const roomId =
+      (await this.findGeneral(spaceId)) ??
+      (await this.#createRoom(`${this.#aliasName(spaceId)}-general`, {
+        name: "General",
+        // Anyone on the organization's homeserver can join; the room directory does not list it
+        preset: "public_chat",
+        initial_state: [
+          {
+            type: "m.space.parent",
+            state_key: spaceRoomId,
+            content: {
+              via,
+              canonical: true,
+            },
+          },
+        ],
+      }));
+
+    // Checked on every call, since a failure right after the creation leaves the room out of the space
+    const child = await this.#client.getRoomStateEvent(spaceRoomId, "m.space.child", roomId).catch((error: unknown) => {
+      if (isNotFound(error)) return null;
+      throw error;
+    });
+    if (!child?.via) {
+      await this.#client.sendStateEvent(spaceRoomId, "m.space.child", roomId, {
+        via,
+        suggested: true,
+      });
+    }
+    return roomId;
+  }
+
+  async #createRoom(
+    aliasName: string,
+    {
+      initial_state = [],
+      ...options
+    }: {
+      name: string;
+      preset: "private_chat" | "public_chat";
+      creation_content?: Record<string, unknown>;
+      initial_state?: {
+        type: string;
+        state_key: string;
+        content: Record<string, unknown>;
+      }[];
+    },
+  ): Promise<string> {
     try {
       return await this.#client.createRoom({
-        name,
-        room_alias_name: this.#aliasName(spaceId),
-        preset: "private_chat",
+        ...options,
+        room_alias_name: aliasName,
         visibility: "private",
-        creation_content: {
-          type: "m.space",
-        },
         initial_state: [
           {
             type: "m.room.history_visibility",
@@ -79,6 +140,7 @@ export class MatrixSpaces implements SpaceMatrix {
               history_visibility: "shared",
             },
           },
+          ...initial_state,
         ],
         // Only the bridge changes membership and settings, so the room never drifts from the directory
         power_level_content_override: {
@@ -98,7 +160,7 @@ export class MatrixSpaces implements SpaceMatrix {
       if (errcodeOf(error) !== "M_ROOM_IN_USE") {
         throw error;
       }
-      return this.#client.resolveRoom(this.#alias(spaceId));
+      return this.#client.resolveRoom(`#${aliasName}:${this.#domain}`);
     }
   }
 

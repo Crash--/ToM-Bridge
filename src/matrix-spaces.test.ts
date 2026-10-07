@@ -77,6 +77,56 @@ describe("MatrixSpaces", () => {
     expect(JSON.stringify(options)).not.toContain("m.room.encryption");
   });
 
+  it("creates a public General room inside the space, out of the room directory", async () => {
+    client.resolveRoom.mockRejectedValue(matrixError(404, "M_NOT_FOUND"));
+    client.createRoom.mockResolvedValue("!general:acme.example");
+    client.getRoomStateEvent.mockRejectedValue(matrixError(404, "M_NOT_FOUND"));
+
+    expect(await spaces.ensureGeneral(SPACE, ROOM)).toBe("!general:acme.example");
+
+    const [options] = client.createRoom.mock.calls[0]!;
+    expect(options).toMatchObject({
+      name: "General",
+      room_alias_name: `twake-space-${SPACE}-general`,
+      preset: "public_chat",
+      visibility: "private",
+      power_level_content_override: {
+        events_default: 50,
+        kick: 100,
+      },
+    });
+    expect(options.initial_state).toContainEqual({
+      type: "m.space.parent",
+      state_key: ROOM,
+      content: {
+        via: [
+          "acme.example",
+        ],
+        canonical: true,
+      },
+    });
+    expect(client.sendStateEvent).toHaveBeenCalledWith(ROOM, "m.space.child", "!general:acme.example", {
+      via: [
+        "acme.example",
+      ],
+      suggested: true,
+    });
+  });
+
+  it("reuses General and leaves the space's link to it alone", async () => {
+    client.resolveRoom.mockResolvedValue("!general:acme.example");
+    client.getRoomStateEvent.mockResolvedValue({
+      via: [
+        "acme.example",
+      ],
+    });
+
+    expect(await spaces.ensureGeneral(SPACE, ROOM)).toBe("!general:acme.example");
+    expect(client.resolveRoom).toHaveBeenCalledWith(`#twake-space-${SPACE}-general:acme.example`);
+    expect(client.createRoom).not.toHaveBeenCalled();
+    expect(client.sendStateEvent).not.toHaveBeenCalled();
+  });
+
   it("returns the space a concurrent delivery created", async () => {
     client.createRoom.mockRejectedValue(matrixError(400, "M_ROOM_IN_USE"));
 
