@@ -75,6 +75,8 @@ describe("MatrixSpaces", () => {
         },
         invite: 100,
         kick: 100,
+        ban: 100,
+        redact: 75,
       },
     });
     expect(JSON.stringify(options)).not.toContain("m.room.encryption");
@@ -203,6 +205,7 @@ describe("MatrixSpaces", () => {
       events: expect.objectContaining({
         "org.matrix.msc3401.call.member": 50,
       }),
+      redact: 75,
     });
   });
 
@@ -240,6 +243,7 @@ describe("MatrixSpaces", () => {
         "m.poll.response": 50,
         "app.twake.chat.thread_resolved": 50,
       },
+      redact: 75,
     });
 
     await spaces.setPowerLevels(ROOM, {

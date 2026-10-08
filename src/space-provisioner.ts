@@ -144,11 +144,14 @@ function displayNameOf(member: SpaceMember): string {
   );
 }
 
-// An admin of the space administers its rooms in Twake Chat too
-const ADMIN_LEVEL = 100;
+/**
+ * An admin of the space moderates its rooms in Twake Chat (removes messages),
+ * under the bridge: members, invitations and settings follow TwakeSpace only.
+ */
+export const MODERATOR_LEVEL = 75;
 
 function levelOf(role: Role): number | null {
-  if (role === "admin") return ADMIN_LEVEL;
+  if (role === "admin") return MODERATOR_LEVEL;
   return role === "viewer" ? null : POSTER_LEVEL;
 }
 

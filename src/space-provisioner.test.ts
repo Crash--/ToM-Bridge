@@ -277,7 +277,7 @@ describe("createSpaceEventHandler", () => {
       });
     });
 
-    it("makes the admins of the space administer its rooms", async () => {
+    it("makes the admins of the space moderate its rooms", async () => {
       await handler()(
         spaceEvent({
           name: "Design Sprint",
@@ -293,7 +293,7 @@ describe("createSpaceEventHandler", () => {
       );
 
       expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, expect.objectContaining({
-        "@jdoe:acme.example": 100,
+        "@jdoe:acme.example": 75,
       }));
     });
 

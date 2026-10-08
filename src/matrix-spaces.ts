@@ -1,6 +1,6 @@
 import type { MatrixClient } from "@vector-im/matrix-bot-sdk";
 
-import { POSTER_LEVEL, type SpaceMatrix } from "./space-provisioner";
+import { MODERATOR_LEVEL, POSTER_LEVEL, type SpaceMatrix } from "./space-provisioner";
 
 const BRIDGE_LEVEL = 100;
 
@@ -169,7 +169,7 @@ export class MatrixSpaces implements SpaceMatrix {
           invite: BRIDGE_LEVEL,
           kick: BRIDGE_LEVEL,
           ban: BRIDGE_LEVEL,
-          redact: BRIDGE_LEVEL,
+          redact: MODERATOR_LEVEL,
         },
       });
     } catch (error) {
@@ -231,7 +231,9 @@ export class MatrixSpaces implements SpaceMatrix {
       ...MEMBER_EVENTS,
       ...powerLevels.events,
     };
-    let changed = Object.keys(events).length !== Object.keys(powerLevels.events ?? {}).length;
+    let changed =
+      Object.keys(events).length !== Object.keys(powerLevels.events ?? {}).length ||
+      powerLevels.redact !== MODERATOR_LEVEL;
     for (const [matrixId, level] of changes) {
       if (level === null && matrixId in users) {
         delete users[matrixId];
@@ -247,6 +249,7 @@ export class MatrixSpaces implements SpaceMatrix {
         ...powerLevels,
         users,
         events,
+        redact: MODERATOR_LEVEL,
       });
     }
   }
