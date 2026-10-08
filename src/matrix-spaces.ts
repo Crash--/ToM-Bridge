@@ -196,23 +196,32 @@ export class MatrixSpaces implements SpaceMatrix {
   }
 
   async join(roomId: string, matrixId: string): Promise<void> {
+    // Synapse refuses to join someone already in the room: a sync would fail on every member
+    if ((await this.#membership(roomId, matrixId)) === "join") {
+      return;
+    }
     await this.#client.doRequest("POST", `/_synapse/admin/v1/join/${encodeURIComponent(roomId)}`, null, {
       user_id: matrixId,
     });
   }
 
   async kick(roomId: string, matrixId: string): Promise<void> {
-    let membership: string | undefined;
-    try {
-      ({ membership } = await this.#client.getRoomStateEvent(roomId, "m.room.member", matrixId));
-    } catch (error) {
-      if (isNotFound(error)) {
-        return;
-      }
-      throw error;
-    }
+    const membership = await this.#membership(roomId, matrixId);
     if (membership === "join" || membership === "invite") {
       await this.#client.kickUser(matrixId, roomId);
+    }
+  }
+
+  /** The membership of someone in a room, undefined when they never had one. */
+  async #membership(roomId: string, matrixId: string): Promise<string | undefined> {
+    try {
+      const { membership } = await this.#client.getRoomStateEvent(roomId, "m.room.member", matrixId);
+      return membership;
+    } catch (error) {
+      if (isNotFound(error)) {
+        return undefined;
+      }
+      throw error;
     }
   }
 

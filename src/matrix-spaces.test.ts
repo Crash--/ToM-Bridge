@@ -162,6 +162,26 @@ describe("MatrixSpaces", () => {
     });
   });
 
+  it("does not join someone already in the room", async () => {
+    client.getRoomStateEvent.mockResolvedValue({
+      membership: "join",
+    });
+
+    await spaces.join(ROOM, "@jdoe:acme.example");
+
+    expect(client.doRequest).not.toHaveBeenCalled();
+  });
+
+  it("joins someone who left the room", async () => {
+    client.getRoomStateEvent.mockResolvedValue({
+      membership: "leave",
+    });
+
+    await spaces.join(ROOM, "@jdoe:acme.example");
+
+    expect(client.doRequest).toHaveBeenCalledTimes(1);
+  });
+
   it("does not kick someone who already left", async () => {
     client.getRoomStateEvent.mockResolvedValue({
       membership: "leave",
