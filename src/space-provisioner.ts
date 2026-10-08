@@ -144,7 +144,11 @@ function displayNameOf(member: SpaceMember): string {
   );
 }
 
+// An admin of the space administers its rooms in Twake Chat too
+const ADMIN_LEVEL = 100;
+
 function levelOf(role: Role): number | null {
+  if (role === "admin") return ADMIN_LEVEL;
   return role === "viewer" ? null : POSTER_LEVEL;
 }
 

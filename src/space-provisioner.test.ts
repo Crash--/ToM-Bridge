@@ -267,7 +267,7 @@ describe("createSpaceEventHandler", () => {
       ]);
     });
 
-    it("lets editors, admins and TwakeSpace post, and viewers only read", async () => {
+    it("lets editors and TwakeSpace post, and viewers only read", async () => {
       await handler()(created, properties("created"));
 
       expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, {
@@ -275,6 +275,26 @@ describe("createSpaceEventHandler", () => {
         "@vlee:acme.example": null,
         "@twakespace:acme.example": 50,
       });
+    });
+
+    it("makes the admins of the space administer its rooms", async () => {
+      await handler()(
+        spaceEvent({
+          name: "Design Sprint",
+          members: [
+            {
+              ...jdoe,
+              role: "admin",
+            },
+          ],
+          groups: [],
+        }),
+        properties("created"),
+      );
+
+      expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, expect.objectContaining({
+        "@jdoe:acme.example": 100,
+      }));
     });
 
     it("names accounts after the email when the homeserver does", async () => {
