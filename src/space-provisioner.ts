@@ -312,10 +312,15 @@ export function createSpaceEventHandler({
       await matrix.ensureGeneral(spaceId, roomId),
     ];
 
-    // An app service user only exists once its app service registers it, which TwakeSpace may not have done yet
-    await matrix.ensureUser(twakeSpaceUserId, "TwakeSpace");
-    for (const room of rooms) {
-      await matrix.join(room, twakeSpaceUserId);
+    // An app service user only exists once its app service registers it, which TwakeSpace may not have done yet.
+    // When its namespace is exclusive, Synapse refuses to create it (M_EXCLUSIVE): the members still get the space
+    try {
+      await matrix.ensureUser(twakeSpaceUserId, "TwakeSpace");
+      for (const room of rooms) {
+        await matrix.join(room, twakeSpaceUserId);
+      }
+    } catch (error) {
+      log.warn(`${twakeSpaceUserId} cannot join the space ${spaceId}: ${(error as Error).message}`);
     }
     const members = named(membersOf(message));
     const levels = await addMembers(rooms, spaceId, members, timestamp);

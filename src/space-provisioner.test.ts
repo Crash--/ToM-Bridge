@@ -267,6 +267,23 @@ describe("createSpaceEventHandler", () => {
       ]);
     });
 
+    it("still provisions the members when TwakeSpace cannot be created (exclusive namespace)", async () => {
+      matrix.ensureUser.mockImplementation((matrixId: string) =>
+        matrixId === "@twakespace:acme.example"
+          ? Promise.reject(
+              Object.assign(new Error("M_EXCLUSIVE"), {
+                errcode: "M_EXCLUSIVE",
+              }),
+            )
+          : Promise.resolve(),
+      );
+
+      await handler()(created, properties("created"));
+
+      expect(matrix.join).toHaveBeenCalledWith(ROOM, "@jdoe:acme.example");
+      expect(matrix.setPowerLevels).toHaveBeenCalled();
+    });
+
     it("lets editors and TwakeSpace post, and viewers only read", async () => {
       await handler()(created, properties("created"));
 
@@ -292,9 +309,12 @@ describe("createSpaceEventHandler", () => {
         properties("created"),
       );
 
-      expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, expect.objectContaining({
-        "@jdoe:acme.example": 75,
-      }));
+      expect(matrix.setPowerLevels).toHaveBeenCalledWith(
+        ROOM,
+        expect.objectContaining({
+          "@jdoe:acme.example": 75,
+        }),
+      );
     });
 
     it("names accounts after the email when the homeserver does", async () => {
