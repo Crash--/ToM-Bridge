@@ -4,6 +4,21 @@ import { POSTER_LEVEL, type SpaceMatrix } from "./space-provisioner";
 
 const BRIDGE_LEVEL = 100;
 
+/**
+ * What a member of the space sends in Twake Chat beyond messages: joining a
+ * call (a state event, MatrixRTC), the commands of a bot (MSC4332), a poll
+ * vote (MSC3381) and a resolved thread. At the state level of the bridge, a
+ * member could not join a call.
+ */
+const MEMBER_EVENTS: Record<string, number> = {
+  "org.matrix.msc3401.call.member": POSTER_LEVEL,
+  "org.matrix.msc4332.commands": POSTER_LEVEL,
+  "m.bot.commands": POSTER_LEVEL,
+  "org.matrix.msc3381.poll.response": POSTER_LEVEL,
+  "m.poll.response": POSTER_LEVEL,
+  "app.twake.chat.thread_resolved": POSTER_LEVEL,
+};
+
 function errcodeOf(error: unknown): string | undefined {
   return (
     error as {
@@ -149,6 +164,7 @@ export class MatrixSpaces implements SpaceMatrix {
           },
           users_default: 0,
           events_default: POSTER_LEVEL,
+          events: MEMBER_EVENTS,
           state_default: BRIDGE_LEVEL,
           invite: BRIDGE_LEVEL,
           kick: BRIDGE_LEVEL,
@@ -210,7 +226,12 @@ export class MatrixSpaces implements SpaceMatrix {
     const users: Record<string, number> = {
       ...powerLevels.users,
     };
-    let changed = false;
+    // Rooms created before MEMBER_EVENTS get them on their next change
+    const events: Record<string, number> = {
+      ...MEMBER_EVENTS,
+      ...powerLevels.events,
+    };
+    let changed = Object.keys(events).length !== Object.keys(powerLevels.events ?? {}).length;
     for (const [matrixId, level] of changes) {
       if (level === null && matrixId in users) {
         delete users[matrixId];
@@ -225,6 +246,7 @@ export class MatrixSpaces implements SpaceMatrix {
       await this.#client.sendStateEvent(roomId, "m.room.power_levels", "", {
         ...powerLevels,
         users,
+        events,
       });
     }
   }
