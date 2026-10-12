@@ -6,13 +6,14 @@ import {
   Bridge as MockBridge,
   Cli as MockCli,
   Database as MockDatabase,
+  DeadLetterError,
   Logger as MockLogger,
   RabbitMQClient as MockRabbitMQClient,
 } from "./__mocks__/shared";
 
 // Register the shared leaf-dependency mocks for this test file
 mock.module("matrix-appservice-bridge", () => ({ AppServiceRegistration, Bridge: MockBridge, Cli: MockCli, Logger: MockLogger }));
-mock.module("@linagora/rabbitmq-client", () => ({ RabbitMQClient: MockRabbitMQClient }));
+mock.module("@linagora/rabbitmq-client", () => ({ RabbitMQClient: MockRabbitMQClient, DeadLetterError }));
 mock.module("./db", () => ({ Database: MockDatabase }));
 
 const mockUploadContentFromUrl = mock(() => Promise.resolve("mxc://example.com/uploaded123"));

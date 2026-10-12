@@ -4,6 +4,7 @@ import {
   AppServiceRegistration,
   Bridge,
   Cli,
+  DeadLetterError,
   Logger,
   Database as MockDatabase,
   RabbitMQClient as MockRabbitMQClient,
@@ -25,6 +26,7 @@ mock.module("matrix-appservice-bridge", () => ({
 }));
 mock.module("@linagora/rabbitmq-client", () => ({
   RabbitMQClient: MockRabbitMQClient,
+  DeadLetterError,
 }));
 mock.module("./db", () => ({
   Database: MockDatabase,

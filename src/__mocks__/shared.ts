@@ -81,6 +81,8 @@ export const AppServiceRegistration: { generateToken: MockFn } = {
 
 // @linagora/rabbitmq-client
 export const RabbitMQClient: MockFn = mock<AnyFn>();
+// What the space events throw to reach the dead-letter queue: the mocked module still exports the real one
+export { DeadLetterError } from "@linagora/rabbitmq-client";
 
 // ./db
 export const Database: MockFn = mock<AnyFn>();
