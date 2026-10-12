@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 
 import type { Logger } from "matrix-appservice-bridge";
 
-import type { RabbitMQMessageProperties } from "@linagora/rabbitmq-client";
+import { DeadLetterError, type RabbitMQMessageProperties } from "@linagora/rabbitmq-client";
 
 import {
   createKeyedLock,
@@ -102,7 +102,7 @@ function memoryRegistry(): SpaceRegistry & {
     remember: (space) => {
       spaces.set(space.spaceId, {
         ...space,
-        deleteAt: spaces.get(space.spaceId)?.deleteAt ?? null,
+        deleteAt: null,
       });
       return Promise.resolve();
     },
@@ -238,7 +238,7 @@ describe("createSpaceEventHandler", () => {
 
       expect(matrix.createSpace).toHaveBeenCalledWith(SPACE, "Design Sprint");
       expect(matrix.ensureGeneral).toHaveBeenCalledWith(SPACE, ROOM);
-      expect(matrix.ensureUser).toHaveBeenCalledWith("@twakespace:acme.example", "TwakeSpace");
+      expect(matrix.ensureUser).not.toHaveBeenCalledWith("@twakespace:acme.example", expect.anything());
       expect(matrix.ensureUser).toHaveBeenCalledWith("@jdoe:acme.example", "John Doe");
       expect(matrix.ensureUser).toHaveBeenCalledWith("@vlee:acme.example", "vlee");
       expect(matrix.join.mock.calls).toEqual([
@@ -289,11 +289,15 @@ describe("createSpaceEventHandler", () => {
     it("lets editors and TwakeSpace post, and viewers only read", async () => {
       await handler()(created, properties("created"));
 
-      expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, {
-        "@jdoe:acme.example": 50,
-        "@vlee:acme.example": null,
-        "@twakespace:acme.example": 50,
-      });
+      expect(matrix.setPowerLevels).toHaveBeenCalledWith(
+        ROOM,
+        {
+          "@jdoe:acme.example": 50,
+          "@vlee:acme.example": null,
+          "@twakespace:acme.example": 50,
+        },
+        true,
+      );
     });
 
     it("makes the admins of the space moderate its rooms", async () => {
@@ -316,6 +320,7 @@ describe("createSpaceEventHandler", () => {
         expect.objectContaining({
           "@jdoe:acme.example": 75,
         }),
+        true,
       );
     });
 
@@ -411,6 +416,7 @@ describe("createSpaceEventHandler", () => {
           "@vlee:acme.example": null,
           "@twakespace:acme.example": 50,
         },
+        true,
       ]);
     });
   });
@@ -427,9 +433,13 @@ describe("createSpaceEventHandler", () => {
       );
 
       expect(matrix.join).toHaveBeenCalledWith(ROOM, "@jdoe:acme.example");
-      expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, {
-        "@jdoe:acme.example": 50,
-      });
+      expect(matrix.setPowerLevels).toHaveBeenCalledWith(
+        ROOM,
+        {
+          "@jdoe:acme.example": 50,
+        },
+        true,
+      );
     });
 
     it("adds and removes a member in General too", async () => {
@@ -450,13 +460,21 @@ describe("createSpaceEventHandler", () => {
       );
 
       expect(matrix.join).toHaveBeenCalledWith(GENERAL, "@jdoe:acme.example");
-      expect(matrix.setPowerLevels).toHaveBeenCalledWith(GENERAL, {
-        "@jdoe:acme.example": 50,
-      });
+      expect(matrix.setPowerLevels).toHaveBeenCalledWith(
+        GENERAL,
+        {
+          "@jdoe:acme.example": 50,
+        },
+        false,
+      );
       expect(matrix.kick).toHaveBeenCalledWith(GENERAL, "@jdoe:acme.example");
-      expect(matrix.setPowerLevels).toHaveBeenCalledWith(GENERAL, {
-        "@jdoe:acme.example": null,
-      });
+      expect(matrix.setPowerLevels).toHaveBeenCalledWith(
+        GENERAL,
+        {
+          "@jdoe:acme.example": null,
+        },
+        false,
+      );
     });
 
     it("fails, so it is retried, while the space has no Matrix space", async () => {
@@ -500,7 +518,7 @@ describe("createSpaceEventHandler", () => {
         properties("member.role.changed"),
       );
 
-      expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, {});
+      expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, {}, true);
     });
 
     it("removes a member and their level", async () => {
@@ -514,9 +532,13 @@ describe("createSpaceEventHandler", () => {
       );
 
       expect(matrix.kick).toHaveBeenCalledWith(ROOM, "@jdoe:acme.example");
-      expect(matrix.setPowerLevels).toHaveBeenCalledWith(ROOM, {
-        "@jdoe:acme.example": null,
-      });
+      expect(matrix.setPowerLevels).toHaveBeenCalledWith(
+        ROOM,
+        {
+          "@jdoe:acme.example": null,
+        },
+        true,
+      );
     });
   });
 
@@ -571,8 +593,34 @@ describe("createSpaceEventHandler", () => {
       "no members",
       spaceEvent({}),
     ],
-  ])("drops an event with %s instead of retrying it", async (_, event) => {
-    await handler()(event, properties("member.added"));
+    [
+      "a member that is not an object",
+      spaceEvent({
+        members: [
+          null,
+        ],
+      }),
+    ],
+    [
+      "a member without uuid",
+      spaceEvent({
+        members: [
+          {
+            username: "jdoe",
+            role: "editor",
+          },
+        ],
+      }),
+    ],
+    [
+      "the id of another space's General",
+      spaceEvent({
+        id: `${SPACE}-general`,
+        members: [],
+      }),
+    ],
+  ])("sends an event with %s to the dead-letter queue instead of retrying it", async (_, event) => {
+    await expect(handler()(event, properties("member.added"))).rejects.toBeInstanceOf(DeadLetterError);
 
     expect(matrix.join).not.toHaveBeenCalled();
   });
@@ -691,6 +739,123 @@ describe("createSpaceEventHandler", () => {
       expect(matrix.kick).not.toHaveBeenCalled();
       expect(await registry.deletionOf(SPACE)).toBe(deleteAt);
     });
+  });
+
+  describe("a member Synapse refuses", () => {
+    const refused = Object.assign(new Error("M_FORBIDDEN: the account is deactivated"), {
+      statusCode: 403,
+    });
+    const event = spaceEvent({
+      name: "Design Sprint",
+      members: [
+        jdoe,
+        viewer,
+      ],
+    });
+
+    it("is left out, and the others of the event still get the space", async () => {
+      matrix.join.mockImplementation((_room: string, matrixId: string) =>
+        matrixId === "@jdoe:acme.example" ? Promise.reject(refused) : Promise.resolve(),
+      );
+
+      await handler()(event, properties("synced"));
+
+      expect(matrix.join).toHaveBeenCalledWith(ROOM, "@vlee:acme.example");
+      expect(matrix.setPowerLevels).toHaveBeenCalledWith(
+        ROOM,
+        {
+          "@vlee:acme.example": null,
+          "@twakespace:acme.example": 50,
+        },
+        true,
+      );
+      expect(publish).toHaveBeenCalled();
+    });
+
+    it("fails the event when the homeserver itself fails, so it is retried", async () => {
+      matrix.join.mockRejectedValue(
+        Object.assign(new Error("bad gateway"), {
+          statusCode: 502,
+        }),
+      );
+
+      await expect(handler()(event, properties("synced"))).rejects.toThrow("bad gateway");
+    });
+
+    it("gives the members the space when TwakeSpace's account does not exist yet, without creating it", async () => {
+      matrix.join.mockImplementation((_room: string, matrixId: string) =>
+        matrixId === "@twakespace:acme.example" ? Promise.reject(refused) : Promise.resolve(),
+      );
+
+      await handler()(event, properties("created"));
+
+      expect(matrix.ensureUser).not.toHaveBeenCalledWith("@twakespace:acme.example", expect.anything());
+      expect(matrix.join).toHaveBeenCalledWith(ROOM, "@jdoe:acme.example");
+    });
+  });
+
+  it("lets a member with a role it does not know only read", async () => {
+    await handler()(
+      spaceEvent({
+        members: [
+          {
+            ...jdoe,
+            role: "owner",
+          },
+        ],
+      }),
+      properties("member.added"),
+    );
+
+    expect(matrix.setPowerLevels).toHaveBeenCalledWith(
+      ROOM,
+      {
+        "@jdoe:acme.example": null,
+      },
+      true,
+    );
+  });
+
+  it("announces a Matrix space under the same event id every time", async () => {
+    const event = spaceEvent({
+      name: "Design Sprint",
+      members: [],
+    });
+    const handle = handler();
+
+    await handle(event, properties("created"));
+    await handle(event, properties("synced"));
+
+    const [first, second] = publish.mock.calls.map(([, announced]) => announced.id);
+    expect(first).toMatch(/^[0-9a-f-]{36}$/);
+    expect(second).toBe(first);
+  });
+
+  it("keeps the role of a sync when the created event of the space comes after it", async () => {
+    const at = (timestamp: string, role: string) =>
+      spaceEvent({
+        name: "Design Sprint",
+        timestamp,
+        members: [
+          {
+            ...jdoe,
+            role,
+          },
+        ],
+      });
+    const handle = handler();
+
+    await handle(at("2026-10-07T02:00:00.000Z", "admin"), properties("synced"));
+    matrix.setPowerLevels.mockClear();
+    await handle(at("2026-10-06T09:12:44.512Z", "editor"), properties("created"));
+
+    expect(matrix.setPowerLevels).not.toHaveBeenCalledWith(
+      ROOM,
+      expect.objectContaining({
+        "@jdoe:acme.example": 50,
+      }),
+      true,
+    );
   });
 
   describe("events at once", () => {
@@ -820,11 +985,15 @@ describe("createSpaceEventHandler", () => {
         ROOM,
         GENERAL,
       ]) {
-        expect(matrix.setPowerLevels).toHaveBeenCalledWith(room, {
-          "@jdoe:acme.example": 50,
-          "@vlee:acme.example": null,
-          "@twakespace:acme.example": 50,
-        });
+        expect(matrix.setPowerLevels).toHaveBeenCalledWith(
+          room,
+          {
+            "@jdoe:acme.example": 50,
+            "@vlee:acme.example": null,
+            "@twakespace:acme.example": 50,
+          },
+          room === ROOM,
+        );
       }
     });
 
@@ -927,25 +1096,70 @@ describe("createSpaceEventHandler", () => {
       expect(await registry.deletionOf("fresh")).toBeNull();
     });
 
-    it("drops an event without spaceIds instead of retrying it", async () => {
+    it("gives a space back to its members when a sync lists it again after one that missed it", async () => {
+      await known(SPACE, "2026-10-01T00:00:00.000Z");
+      const handle = handler();
+      await handle(completed([]), properties("sync.completed"));
+      expect(await registry.deletionOf(SPACE)).not.toBeNull();
+
+      await handle(
+        spaceEvent({
+          name: "Design Sprint",
+          timestamp: "2026-10-07T02:00:00.000Z",
+          members: [
+            jdoe,
+          ],
+        }),
+        properties("synced"),
+      );
+
+      expect(matrix.ensureGeneral).toHaveBeenCalledWith(SPACE, ROOM);
+      expect(matrix.join).toHaveBeenCalledWith(ROOM, "@jdoe:acme.example");
+      expect(await registry.deletionOf(SPACE)).toBeNull();
+    });
+
+    it("still ignores the member events of a space a sync no longer lists", async () => {
+      await known(SPACE, "2026-10-01T00:00:00.000Z");
+      const handle = handler();
+      await handle(completed([]), properties("sync.completed"));
+
+      await handle(
+        spaceEvent({
+          timestamp: "2026-10-07T02:00:00.000Z",
+          members: [
+            jdoe,
+          ],
+        }),
+        properties("member.added"),
+      );
+
+      expect(matrix.join).not.toHaveBeenCalled();
+      expect(await registry.deletionOf(SPACE)).not.toBeNull();
+    });
+
+    it("dead-letters an event without spaceIds instead of retrying it", async () => {
       await known("gone", "2026-10-01T00:00:00.000Z");
 
-      await handler()(completed(undefined), properties("sync.completed"));
+      await expect(handler()(completed(undefined), properties("sync.completed"))).rejects.toBeInstanceOf(
+        DeadLetterError,
+      );
 
       expect(await registry.deletionOf("gone")).toBeNull();
     });
 
-    it("drops an event with a malformed space id instead of deleting that space", async () => {
+    it("dead-letters an event with a malformed space id instead of deleting that space", async () => {
       await known("gone", "2026-10-01T00:00:00.000Z");
 
-      await handler()(
-        completed([
-          {
-            id: "gone",
-          },
-        ]),
-        properties("sync.completed"),
-      );
+      await expect(
+        handler()(
+          completed([
+            {
+              id: "gone",
+            },
+          ]),
+          properties("sync.completed"),
+        ),
+      ).rejects.toBeInstanceOf(DeadLetterError);
 
       expect(await registry.deletionOf("gone")).toBeNull();
     });
@@ -984,7 +1198,7 @@ describe("requestFirstSync", () => {
     });
   });
 
-  it("requests nothing once it knows a space, or without the database", async () => {
+  it("requests nothing once it knows a space", async () => {
     const registry = memoryRegistry();
     await registry.remember({
       spaceId: "known",
@@ -1000,16 +1214,6 @@ describe("requestFirstSync", () => {
       organizationId: "acme",
       log,
     });
-    await requestFirstSync({
-      registry: {
-        ...memoryRegistry(),
-        hasSpaces: () => Promise.resolve(null),
-      },
-      publish,
-      organizationId: "acme",
-      log,
-    });
-
     expect(publish).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 import type { Logger } from "matrix-appservice-bridge";
 
-import type { RabbitMQMessageProperties } from "@linagora/rabbitmq-client";
+import { DeadLetterError, type RabbitMQMessageProperties } from "@linagora/rabbitmq-client";
 
 import { toSynapseLocalpart } from "./account-eraser";
 import type { SpacesConfig } from "./types";
@@ -12,20 +12,21 @@ export const PROVISIONED_TYPE = "com.twake.chat.space.provisioned.v1";
 
 export const SYNC_REQUESTED = "twake.space.sync.requested";
 
+const PROVISIONED_NAMESPACE: string = Bun.randomUUIDv5(PROVISIONED_TYPE, "url");
+
 /** How long a deleted space's Matrix space is kept, without members, before it is purged. */
 export const RETENTION_MS: number = 30 * 24 * 60 * 60 * 1000;
 
 const ROUTING_KEY_PREFIX = "twake.space.";
 
-type Role = "viewer" | "editor" | "admin";
-
+/** As the directory sent it: only `uuid` is checked, so every other field is read with care. */
 interface SpaceMember {
   readonly uuid: string;
-  readonly username: string;
-  readonly email: string;
-  readonly firstName?: string;
-  readonly lastName?: string;
-  readonly role: Role;
+  readonly username?: unknown;
+  readonly email?: unknown;
+  readonly firstName?: unknown;
+  readonly lastName?: unknown;
+  readonly role?: unknown;
 }
 
 interface NamedMember extends SpaceMember {
@@ -38,14 +39,14 @@ export interface SpaceMatrix {
   /** Creates the space's Matrix space, or returns the one a concurrent delivery created. */
   createSpace(spaceId: string, name: string): Promise<string>;
   findGeneral(spaceId: string): Promise<string | null>;
-  /** Finds or creates the space's public General room, and makes sure the Matrix space lists it. */
+  /** Finds or creates the space's General room, which its members only join, and makes sure the Matrix space lists it. */
   ensureGeneral(spaceId: string, spaceRoomId: string): Promise<string>;
   ensureUser(matrixId: string, displayName: string): Promise<void>;
   join(roomId: string, matrixId: string): Promise<void>;
   /** Removes a member, doing nothing when they are not in the room. */
   kick(roomId: string, matrixId: string): Promise<void>;
   /** Sets each user's power level, null taking it back to the default. */
-  setPowerLevels(roomId: string, levels: Record<string, number | null>): Promise<void>;
+  setPowerLevels(roomId: string, levels: Record<string, number | null>, isSpace: boolean): Promise<void>;
   rename(roomId: string, name: string): Promise<void>;
   /** Lets no one join without an invite. */
   closeRoom(roomId: string): Promise<void>;
@@ -69,6 +70,7 @@ export interface KnownSpace {
  * ones whose Matrix space is due for deletion. Space ids are lowercased.
  */
 export interface SpaceRegistry {
+  /** Records the space as provisioned, which also cancels its deletion. */
   remember(space: KnownSpace): Promise<void>;
   /** When the space's Matrix space gets deleted, or null when it is not being deleted. */
   deletionOf(spaceId: string): Promise<number | null>;
@@ -77,8 +79,8 @@ export interface SpaceRegistry {
   spacesOf(organizationId: string): Promise<KnownSpace[]>;
   dueBy(time: number): Promise<KnownSpace[]>;
   forget(spaceId: string): Promise<void>;
-  /** Whether the bridge knows a space of the organization, or of any when omitted. Null without the database. */
-  hasSpaces(organizationId?: string): Promise<boolean | null>;
+  /** Whether the bridge knows a space of the organization, or of any when omitted. */
+  hasSpaces(organizationId?: string): Promise<boolean>;
 }
 
 /**
@@ -130,7 +132,18 @@ interface Deps {
   readonly log: Logger;
 }
 
-class InvalidSpaceEvent extends Error {}
+/** Retrying the same bytes fails the same way: the client sends it to the dead-letter queue at once. */
+class InvalidSpaceEvent extends DeadLetterError {}
+
+/** Synapse refused this request and would refuse it again, unlike a failure of the homeserver. */
+function isRefused(error: unknown): boolean {
+  const status = (
+    error as {
+      statusCode?: unknown;
+    }
+  ).statusCode;
+  return typeof status === "number" && status >= 400 && status < 500 && status !== 429;
+}
 
 /**
  * The event name, from a routing key ldap-rest published (`twake.space.<event>`)
@@ -158,17 +171,21 @@ function membersOf(message: Record<string, unknown>): SpaceMember[] {
   if (!Array.isArray(members)) {
     throw new InvalidSpaceEvent("the event has no members");
   }
+  if (!members.every((member) => typeof member?.uuid === "string")) {
+    throw new InvalidSpaceEvent("the event has a member without uuid");
+  }
   return members as SpaceMember[];
 }
 
-function displayNameOf(member: SpaceMember): string {
+function displayNameOf(member: NamedMember): string {
   return (
     [
       member.firstName,
       member.lastName,
     ]
-      .filter(Boolean)
-      .join(" ") || member.username
+      .filter((name) => typeof name === "string" && name !== "")
+      .join(" ") ||
+    (typeof member.username === "string" ? member.username : member.matrixId.slice(1, member.matrixId.indexOf(":")))
   );
 }
 
@@ -178,9 +195,10 @@ function displayNameOf(member: SpaceMember): string {
  */
 export const MODERATOR_LEVEL = 75;
 
-function levelOf(role: Role): number | null {
+/** A role the bridge does not know only reads, like a viewer: a typo must not let someone post. */
+function levelOf(role: unknown): number | null {
   if (role === "admin") return MODERATOR_LEVEL;
-  return role === "viewer" ? null : POSTER_LEVEL;
+  return role === "editor" ? POSTER_LEVEL : null;
 }
 
 /**
@@ -212,9 +230,9 @@ export function createSpaceEventHandler({
   function matrixIdOf(member: SpaceMember): string | null {
     let login: string | undefined;
     if (config.localpartFrom === "uid") {
-      login = member.username;
-    } else {
-      const at = typeof member.email === "string" ? member.email.indexOf("@") : -1;
+      login = typeof member.username === "string" ? member.username : undefined;
+    } else if (typeof member.email === "string") {
+      const at = member.email.indexOf("@");
       login = at > 0 ? member.email.slice(0, at) : undefined;
     }
     if (!login) {
@@ -263,11 +281,28 @@ export function createSpaceEventHandler({
         ];
   }
 
+  /**
+   * Applies the change of one member. One Synapse refuses (an id too long, a
+   * deactivated account) is left out and logged, like one the SSO mapping
+   * cannot name: failing the event would fail every sync of the space.
+   */
+  async function forMember(spaceId: string, matrixId: string, timestamp: number, apply: () => Promise<void>) {
+    try {
+      return await unlessStale(`${spaceId}/${matrixId}`, timestamp, apply);
+    } catch (error) {
+      if (!isRefused(error)) {
+        throw error;
+      }
+      log.error(`Leaving out ${matrixId} of space ${spaceId}: ${(error as Error).message}`);
+      return false;
+    }
+  }
+
   async function addMembers(rooms: string[], spaceId: string, members: NamedMember[], timestamp: number) {
     const levels: Record<string, number | null> = {};
     for (const member of members) {
       const { matrixId } = member;
-      const applied = await unlessStale(`${spaceId}/${matrixId}`, timestamp, async () => {
+      const applied = await forMember(spaceId, matrixId, timestamp, async () => {
         await matrix.ensureUser(matrixId, displayNameOf(member));
         for (const roomId of rooms) {
           await matrix.join(roomId, matrixId);
@@ -287,9 +322,10 @@ export function createSpaceEventHandler({
     }
   }
 
+  /** The Matrix space comes first in `rooms`. */
   async function setLevels(rooms: string[], levels: Record<string, number | null>) {
-    for (const roomId of rooms) {
-      await matrix.setPowerLevels(roomId, levels);
+    for (const [index, roomId] of rooms.entries()) {
+      await matrix.setPowerLevels(roomId, levels, index === 0);
     }
   }
 
@@ -311,7 +347,7 @@ export function createSpaceEventHandler({
     const levels: Record<string, number | null> = {};
     for (const matrixId of await matrix.members(rooms[0]!)) {
       if (listed.has(matrixId) || matrixId === twakeSpaceUserId) continue;
-      if (await unlessStale(`${spaceId}/${matrixId}`, timestamp, () => kickEverywhere(rooms, matrixId))) {
+      if (await forMember(spaceId, matrixId, timestamp, () => kickEverywhere(rooms, matrixId))) {
         levels[matrixId] = null;
       }
     }
@@ -341,15 +377,17 @@ export function createSpaceEventHandler({
       await matrix.ensureGeneral(spaceId, roomId),
     ];
 
-    // An app service user only exists once its app service registers it, which TwakeSpace may not have done yet.
-    // When its namespace is exclusive, Synapse refuses to create it (M_EXCLUSIVE): the members still get the space
+    // TwakeSpace's app service registers its own account: created here, it would be an ordinary account in that
+    // namespace. Until it exists the join fails, and the members still get the space
     try {
-      await matrix.ensureUser(twakeSpaceUserId, "TwakeSpace");
       for (const room of rooms) {
         await matrix.join(room, twakeSpaceUserId);
       }
     } catch (error) {
-      log.warn(`${twakeSpaceUserId} cannot join the space ${spaceId}: ${(error as Error).message}`);
+      if (!isRefused(error)) {
+        throw error;
+      }
+      log.error(`${twakeSpaceUserId} cannot join the space ${spaceId}: ${(error as Error).message}`);
     }
     const members = named(membersOf(message));
     const levels = await addMembers(rooms, spaceId, members, timestamp);
@@ -373,7 +411,8 @@ export function createSpaceEventHandler({
     // Published again on a redelivery, with the same room, so TwakeSpace gets it whatever failed before
     await publish(PROVISIONED_TYPE, {
       specversion: "1.0",
-      id: crypto.randomUUID(),
+      // The same on every republish, so TwakeSpace drops the one of each nightly sync as a duplicate
+      id: Bun.randomUUIDv5(`${spaceId}/${roomId}`, PROVISIONED_NAMESPACE),
       source: "twake://chat",
       type: PROVISIONED_TYPE,
       time: new Date().toISOString(),
@@ -407,7 +446,7 @@ export function createSpaceEventHandler({
     const rooms = await roomsOf(spaceId, await requireSpace(spaceId));
     const levels: Record<string, number | null> = {};
     for (const { matrixId } of named(membersOf(message))) {
-      if (await unlessStale(`${spaceId}/${matrixId}`, timestamp, () => kickEverywhere(rooms, matrixId))) {
+      if (await forMember(spaceId, matrixId, timestamp, () => kickEverywhere(rooms, matrixId))) {
         levels[matrixId] = null;
       }
     }
@@ -468,6 +507,10 @@ export function createSpaceEventHandler({
     timestamp: number,
   ): Promise<void> {
     const spaceId = requireString(message, "id");
+    // Its alias would be the one of another space's General
+    if (spaceId.toLowerCase().endsWith("-general")) {
+      throw new InvalidSpaceEvent(`${spaceId} cannot be a space id`);
+    }
     // The deletion is read under the lock too: a created event running beside its deleted one would add the members back
     return lock(spaceId.toLowerCase(), () => applySpaceEvent(event, message, spaceId, organizationId, timestamp));
   }
@@ -479,10 +522,18 @@ export function createSpaceEventHandler({
     organizationId: string,
     timestamp: number,
   ) {
-    // A deleted space id is never used again, so whatever arrives after the deletion is late
-    if ((await registry.deletionOf(spaceId.toLowerCase())) !== null) {
-      log.info(`Ignoring ${event} for the deleted space ${spaceId}`);
-      return;
+    const deleteAt = await registry.deletionOf(spaceId.toLowerCase());
+    if (deleteAt !== null) {
+      // A deleted space id is never used again, so whatever arrives after the deletion is late. Except when the
+      // directory lists the space again: a sync.completed that missed it deleted it by mistake
+      // `deleteAt` is when the rooms get purged: the deletion itself came RETENTION_MS before
+      const listedAgain = (event === "created" || event === "synced") && timestamp > deleteAt - RETENTION_MS;
+      if (!listedAgain) {
+        log.info(`Ignoring ${event} for the deleted space ${spaceId}`);
+        return;
+      }
+      // Provisioning cancels the deletion, and opens General to the members again
+      log.warn(`Space ${spaceId} is listed again after its deletion, provisioning it again`);
     }
 
     switch (event) {
@@ -529,10 +580,8 @@ export function createSpaceEventHandler({
     try {
       await handle(message, properties.routingKey);
     } catch (error) {
-      // Retrying the same bytes fails the same way, so the event is dropped instead
       if (error instanceof InvalidSpaceEvent) {
-        log.error(`Discarding space event on ${properties.routingKey}: ${error.message}`);
-        return;
+        log.error(`Dead-lettering the space event on ${properties.routingKey}: ${error.message}`);
       }
       throw error;
     }
@@ -566,8 +615,7 @@ export async function purgeDeletedSpaces(
 /**
  * Asks the directory for a sync while the bridge knows no space, so the spaces
  * created before chat was deployed get a Matrix space. Called once subscribed,
- * or the synced events would reach no queue. Without the database, the nightly
- * sync does it.
+ * or the synced events would reach no queue.
  */
 export async function requestFirstSync({
   registry,
@@ -577,7 +625,7 @@ export async function requestFirstSync({
 }: Pick<Deps, "registry" | "publish" | "log"> & {
   readonly organizationId?: string;
 }): Promise<void> {
-  if ((await registry.hasSpaces(organizationId)) !== false) {
+  if (await registry.hasSpaces(organizationId)) {
     return;
   }
   await publish(SYNC_REQUESTED, {

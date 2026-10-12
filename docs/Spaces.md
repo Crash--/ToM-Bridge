@@ -27,7 +27,8 @@ a bridge only receives its own. A single installation binds `twake.space.#` on
 
 * `created` - creates the Matrix space, adds TwakeSpace's app service user and
   the members, then publishes `com.twake.chat.space.provisioned.v1` with the
-  room id on the activity exchange.
+  room id on the activity exchange. The event id is the same on every
+  republish, so TwakeSpace takes the one of each nightly sync as a duplicate.
 * `updated` - renames the Matrix space.
 * `member.added`, `member.role.changed` - adds the member with the level of
   their role.
@@ -41,6 +42,10 @@ a bridge only receives its own. A single installation binds `twake.space.#` on
   longer listed, and deletes it 30 days later, as for `deleted`.
 * Group events are ignored: ldap-rest also publishes a member event for each
   user a group change affects.
+
+An event the bridge cannot read (no organization, space id, timestamp or
+members, a member without `uuid`, a space id ending in `-general`) goes to the
+dead-letter queue at once, without a retry.
 
 ldap-rest publishes `synced` and `sync.completed` for every organization each
 night, and on request
@@ -74,11 +79,20 @@ their Matrix space without waiting for the night.
 
   | Role in the space | Level | In the Matrix space and General |
   | --- | --- | --- |
-  | admin | 75 | posts, and removes the messages of others |
-  | editor | 50 | posts, joins a call, votes in a poll |
-  | viewer | 0 | reads only: no message, reaction, vote or call |
+  | admin | 75 | as an editor, and removes the messages of others |
+  | editor | 50 | posts, joins a call, votes in a poll, adds a channel |
+  | viewer | 0 | reads and reacts: no message, vote or call |
 
-  TwakeSpace's user is at 50.
+  A role the bridge does not know reads only, like a viewer. Adding a channel
+  is `m.space.child` at 50, in the Matrix space only. The bridge does not keep
+  the members of those channels in step with the space yet.
+* TwakeSpace's user (`twakeSpaceUserId`, `@twakespace:<domain>` by default) is
+  at 50. Its own app service registers that account: the bridge never creates
+  it, and until it exists, logs at error level that it could not join it. The
+  members still get the space.
+* A member Synapse refuses (an id over 255 characters, a deactivated account)
+  is left out and logged at error level, and the rest of the event goes ahead.
+  A failure of the homeserver itself fails the event, which is retried.
 * A member without a Matrix account gets one, named the way the SSO mapping
   names it (`localpartFrom`). For that person to sign in, the homeserver's OIDC
   provider needs `allow_existing_users: true`.
@@ -88,15 +102,17 @@ their Matrix space without waiting for the night.
 Each Matrix space holds a General room, `#twake-space-<space id>-general`,
 which the space's aliases rule above also covers.
 
-* It is public: anyone on the organization's homeserver can join it, and the
-  room directory does not list it.
+* Only the members of the Matrix space can join it (`join_rule: restricted`),
+  so someone removed from the space cannot come back to it. The room directory
+  does not list it. A General created public by an earlier version gets the
+  rule at its next `synced`.
 * The bridge adds and removes the space's members, TwakeSpace's user included,
   in General as in the Matrix space, with the same levels.
 * A sync only removes from General the members it removes from the Matrix
-  space, so someone who joined General on their own stays.
+  space, so someone who joined a General on their own while it was public
+  stays.
 * Deleting the space makes General invite only, so no one can join it again,
   then removes everyone from it. General is deleted with the Matrix space.
-* Whoever is not a member of the space reads General but cannot post in it.
 * A Matrix space created without General gets it at its next `synced`.
 
 ## Ordering
@@ -121,14 +137,14 @@ through retries or because two pods took them together. The bridge stores the
 timestamp of the last change it applied to each member and to the space name,
 and ignores an older event. The lock makes that check and the change one step.
 
-Without the database, only the queue in the pod is left and no timestamp is
-stored: run a single pod, or two pods may change a space at once and an older
-event may undo a newer one, until the nightly sync.
+Spaces need the database: with a `spaces` block, the bridge does not start
+without it. An event the database cannot check or lock fails and is retried,
+then ends in the dead-letter queue, and the nightly sync catches up. Applied
+without its checks, it could undo a newer event or add members back to a
+deleted space.
 
 Each event holds one database connection for the time of its lock: 4 of the
-10 connections of the pool at most, and the others serve the queries. An event
-the database cannot lock fails and is retried, since without the lock it could
-run beside the pod that holds it.
+10 connections of the pool at most, and the others serve the queries.
 
 The space queue was declared with `x-single-active-consumer` by earlier
 versions of this branch. RabbitMQ refuses to declare a queue again with other
@@ -144,16 +160,23 @@ fails and is retried, 3 times a second apart by default, then ends in the
 dead-letter queue: the nightly sync adds the member.
 
 Once a space is deleted, the bridge ignores its events, since its id is never
-used again.
+used again. Except a `created` or `synced` newer than the deletion: the
+directory lists the space again, so a `sync.completed` that missed it deleted
+it by mistake. The bridge cancels the deletion, opens General to the members
+again and adds them back.
 
 ## Deletion
 
 The bridge keeps, in its database, the Matrix space of each space and when it
 is due for deletion. Every hour, each pod deletes and purges the Matrix spaces
-that are due, through the Synapse admin API.
+that are due, through the Synapse admin API. Two pods may delete the same room
+in the same hour, which is harmless: a room already gone counts as deleted, and
+a deletion that fails is tried again an hour later.
 
-Without the database, the bridge cannot keep a deletion for 30 days or tell
-which spaces a sync left out, so `deleted` and `sync.completed` fail and end in
-the dead-letter queue. The next nightly sync catches up.
+## Logs
+
+At `LOG_LEVEL=debug`, the RabbitMQ client logs every message it receives and
+publishes, here the name, email and username of every member of every space.
+Do not leave it on in production.
 
 <!-- vim: set ft=markdown fenc=utf-8 spell spl=en tw=80 cc=80 et ts=2: -->

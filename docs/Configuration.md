@@ -63,7 +63,8 @@ the message broker. The reference blocks are:
   part of their `email`), and TwakeSpace's app service user
   (`twakeSpaceUserId`, `@twakespace:<domain>` by default). With
   `syncRequestExchange`, the bridge requests a sync of the directory while it
-  knows no space, for `organizationId` or for every organization. See
+  knows no space, for `organizationId` or for every organization. Spaces need
+  the database: with this block, the bridge does not start without it. See
   [Spaces](Spaces.md).
 
 ## Passing the Files to the Service

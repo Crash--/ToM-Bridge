@@ -8,15 +8,21 @@ const BRIDGE_LEVEL = 100;
  * What a member of the space sends in Twake Chat beyond messages: joining a
  * call (a state event, MatrixRTC), the commands of a bot (MSC4332), a poll
  * vote (MSC3381) and a resolved thread. At the state level of the bridge, a
- * member could not join a call.
+ * member could not join a call. A viewer reads only, and still reacts.
  */
 const MEMBER_EVENTS: Record<string, number> = {
+  "m.reaction": 0,
   "org.matrix.msc3401.call.member": POSTER_LEVEL,
   "org.matrix.msc4332.commands": POSTER_LEVEL,
   "m.bot.commands": POSTER_LEVEL,
   "org.matrix.msc3381.poll.response": POSTER_LEVEL,
   "m.poll.response": POSTER_LEVEL,
   "app.twake.chat.thread_resolved": POSTER_LEVEL,
+};
+
+/** In the Matrix space only: editors and admins create channels and add them to it. */
+const SPACE_EVENTS: Record<string, number> = {
+  "m.space.child": POSTER_LEVEL,
 };
 
 function errcodeOf(error: unknown): string | undefined {
@@ -87,6 +93,7 @@ export class MatrixSpaces implements SpaceMatrix {
       creation_content: {
         type: "m.space",
       },
+      events: SPACE_EVENTS,
     });
   }
 
@@ -94,13 +101,28 @@ export class MatrixSpaces implements SpaceMatrix {
     const via = [
       this.#domain,
     ];
+    // Only the members of the Matrix space join: someone removed from the space cannot come back to General
+    const joinRules = {
+      join_rule: "restricted",
+      allow: [
+        {
+          type: "m.room_membership",
+          room_id: spaceRoomId,
+        },
+      ],
+    };
+    const found = await this.findGeneral(spaceId);
     const roomId =
-      (await this.findGeneral(spaceId)) ??
+      found ??
       (await this.#createRoom(`${this.#aliasName(spaceId)}-general`, {
         name: "General",
-        // Anyone on the organization's homeserver can join; the room directory does not list it
         preset: "public_chat",
         initial_state: [
+          {
+            type: "m.room.join_rules",
+            state_key: "",
+            content: joinRules,
+          },
           {
             type: "m.space.parent",
             state_key: spaceRoomId,
@@ -111,6 +133,17 @@ export class MatrixSpaces implements SpaceMatrix {
           },
         ],
       }));
+
+    // A General created public, or closed by a deletion a later sync cancels, gets the rule back
+    if (found) {
+      const rules = await this.#client.getRoomStateEvent(roomId, "m.room.join_rules", "").catch((error: unknown) => {
+        if (isNotFound(error)) return null;
+        throw error;
+      });
+      if (rules?.join_rule !== "restricted" || rules.allow?.[0]?.room_id !== spaceRoomId) {
+        await this.#client.sendStateEvent(roomId, "m.room.join_rules", "", joinRules);
+      }
+    }
 
     // Checked on every call, since a failure right after the creation leaves the room out of the space
     const child = await this.#client.getRoomStateEvent(spaceRoomId, "m.space.child", roomId).catch((error: unknown) => {
@@ -130,11 +163,13 @@ export class MatrixSpaces implements SpaceMatrix {
     aliasName: string,
     {
       initial_state = [],
+      events = {},
       ...options
     }: {
       name: string;
       preset: "private_chat" | "public_chat";
       creation_content?: Record<string, unknown>;
+      events?: Record<string, number>;
       initial_state?: {
         type: string;
         state_key: string;
@@ -164,7 +199,10 @@ export class MatrixSpaces implements SpaceMatrix {
           },
           users_default: 0,
           events_default: POSTER_LEVEL,
-          events: MEMBER_EVENTS,
+          events: {
+            ...MEMBER_EVENTS,
+            ...events,
+          },
           state_default: BRIDGE_LEVEL,
           invite: BRIDGE_LEVEL,
           kick: BRIDGE_LEVEL,
@@ -225,7 +263,7 @@ export class MatrixSpaces implements SpaceMatrix {
     }
   }
 
-  async setPowerLevels(roomId: string, levels: Record<string, number | null>): Promise<void> {
+  async setPowerLevels(roomId: string, levels: Record<string, number | null>, isSpace: boolean): Promise<void> {
     const changes = Object.entries(levels);
     if (changes.length === 0) {
       return;
@@ -235,9 +273,10 @@ export class MatrixSpaces implements SpaceMatrix {
     const users: Record<string, number> = {
       ...powerLevels.users,
     };
-    // Rooms created before MEMBER_EVENTS get them on their next change
+    // Rooms created before an event got its level get it on their next change
     const events: Record<string, number> = {
       ...MEMBER_EVENTS,
+      ...(isSpace ? SPACE_EVENTS : {}),
       ...powerLevels.events,
     };
     let changed =

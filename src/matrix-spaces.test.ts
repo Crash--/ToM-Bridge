@@ -5,6 +5,7 @@ import type { MatrixClient } from "@vector-im/matrix-bot-sdk";
 import { MatrixSpaces } from "./matrix-spaces";
 
 const ROOM = "!space:acme.example";
+const GENERAL = "!general:acme.example";
 const SPACE = "3b9e2c71";
 
 function matrixError(statusCode: number, errcode: string) {
@@ -124,6 +125,13 @@ describe("MatrixSpaces", () => {
       via: [
         "acme.example",
       ],
+      join_rule: "restricted",
+      allow: [
+        {
+          type: "m.room_membership",
+          room_id: ROOM,
+        },
+      ],
     });
 
     expect(await spaces.ensureGeneral(SPACE, ROOM)).toBe("!general:acme.example");
@@ -211,10 +219,14 @@ describe("MatrixSpaces", () => {
       events_default: 50,
     });
 
-    await spaces.setPowerLevels(ROOM, {
-      "@jdoe:acme.example": 50,
-      "@vlee:acme.example": null,
-    });
+    await spaces.setPowerLevels(
+      ROOM,
+      {
+        "@jdoe:acme.example": 50,
+        "@vlee:acme.example": null,
+      },
+      false,
+    );
 
     expect(client.sendStateEvent).toHaveBeenCalledWith(ROOM, "m.room.power_levels", "", {
       users: {
@@ -239,9 +251,13 @@ describe("MatrixSpaces", () => {
       },
     });
 
-    await spaces.setPowerLevels(ROOM, {
-      "@jdoe:acme.example": 50,
-    });
+    await spaces.setPowerLevels(
+      ROOM,
+      {
+        "@jdoe:acme.example": 50,
+      },
+      false,
+    );
 
     const [, , , content] = client.sendStateEvent.mock.calls[0]!;
     expect(content.events).toMatchObject({
@@ -256,6 +272,7 @@ describe("MatrixSpaces", () => {
         "@jdoe:acme.example": 50,
       },
       events: {
+        "m.reaction": 0,
         "org.matrix.msc3401.call.member": 50,
         "org.matrix.msc4332.commands": 50,
         "m.bot.commands": 50,
@@ -266,12 +283,130 @@ describe("MatrixSpaces", () => {
       redact: 75,
     });
 
-    await spaces.setPowerLevels(ROOM, {
-      "@jdoe:acme.example": 50,
-      "@vlee:acme.example": null,
-    });
+    await spaces.setPowerLevels(
+      ROOM,
+      {
+        "@jdoe:acme.example": 50,
+        "@vlee:acme.example": null,
+      },
+      false,
+    );
 
     expect(client.sendStateEvent).not.toHaveBeenCalled();
+  });
+
+  it("lets viewers react, and editors add channels to the Matrix space only", async () => {
+    await spaces.createSpace(SPACE, "Design Sprint");
+    client.resolveRoom.mockRejectedValueOnce(matrixError(404, "M_NOT_FOUND"));
+    await spaces.ensureGeneral(SPACE, ROOM);
+
+    const [space, general] = client.createRoom.mock.calls.map(([options]) => options);
+    expect(space.power_level_content_override.events).toMatchObject({
+      "m.reaction": 0,
+      "m.space.child": 50,
+    });
+    expect(general.power_level_content_override.events["m.reaction"]).toBe(0);
+    expect(general.power_level_content_override.events).not.toHaveProperty("m.space.child");
+  });
+
+  it("gives the rooms created before them the levels of reactions and channels", async () => {
+    client.getRoomStateEvent.mockResolvedValue({
+      users: {},
+      events: {
+        "org.matrix.msc3401.call.member": 50,
+      },
+    });
+
+    await spaces.setPowerLevels(
+      ROOM,
+      {
+        "@jdoe:acme.example": 50,
+      },
+      true,
+    );
+    await spaces.setPowerLevels(
+      GENERAL,
+      {
+        "@jdoe:acme.example": 50,
+      },
+      false,
+    );
+
+    const [space, general] = client.sendStateEvent.mock.calls.map(([, , , content]) => content);
+    expect(space.events).toMatchObject({
+      "m.reaction": 0,
+      "m.space.child": 50,
+    });
+    expect(general.events["m.reaction"]).toBe(0);
+    expect(general.events).not.toHaveProperty("m.space.child");
+  });
+
+  describe("General, which someone removed from the space cannot join again", () => {
+    const restricted = {
+      join_rule: "restricted",
+      allow: [
+        {
+          type: "m.room_membership",
+          room_id: ROOM,
+        },
+      ],
+    };
+
+    it("is created for the members of the Matrix space only", async () => {
+      client.resolveRoom.mockRejectedValueOnce(matrixError(404, "M_NOT_FOUND"));
+
+      await spaces.ensureGeneral(SPACE, ROOM);
+
+      const [options] = client.createRoom.mock.calls[0] ?? [];
+      expect(options.initial_state).toContainEqual({
+        type: "m.room.join_rules",
+        state_key: "",
+        content: restricted,
+      });
+    });
+
+    it.each([
+      [
+        "public",
+      ],
+      [
+        "invite",
+      ],
+    ])("gets the rule back when it is %s", async (join_rule) => {
+      client.resolveRoom.mockResolvedValue(GENERAL);
+      client.getRoomStateEvent.mockImplementation(async (_room: string, type: string) =>
+        type === "m.room.join_rules"
+          ? {
+              join_rule,
+            }
+          : {
+              via: [
+                "acme.example",
+              ],
+            },
+      );
+
+      await spaces.ensureGeneral(SPACE, ROOM);
+
+      expect(client.sendStateEvent).toHaveBeenCalledWith(GENERAL, "m.room.join_rules", "", restricted);
+    });
+
+    it("is left alone once it has the rule", async () => {
+      client.resolveRoom.mockResolvedValue(GENERAL);
+      client.getRoomStateEvent.mockImplementation(async (_room: string, type: string) =>
+        type === "m.room.join_rules"
+          ? restricted
+          : {
+              via: [
+                "acme.example",
+              ],
+            },
+      );
+
+      await spaces.ensureGeneral(SPACE, ROOM);
+
+      expect(client.sendStateEvent).not.toHaveBeenCalled();
+    });
   });
 
   it("renames only when the name changed", async () => {

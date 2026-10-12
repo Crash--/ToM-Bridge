@@ -1,16 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn, type Mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, type Mock, mock, spyOn } from "bun:test";
 
-import { MatrixProfileUpdater } from "./matrix-profile-updater";
-import { SettingsRepository } from "./settings-repository";
-import type { BridgeConfig, ISettingsPayload, StoredUserSettings } from "./types";
 import {
   AppServiceRegistration,
   Bridge,
   Cli,
-  Database as MockDatabase,
   Logger,
+  Database as MockDatabase,
   RabbitMQClient as MockRabbitMQClient,
 } from "./__mocks__/shared";
+import { MatrixProfileUpdater } from "./matrix-profile-updater";
+import { SettingsRepository } from "./settings-repository";
+import type { BridgeConfig, ISettingsPayload, StoredUserSettings } from "./types";
 
 type AnyFn = (...args: any[]) => any;
 
@@ -508,6 +508,30 @@ describe("CommonSettingsBridge", () => {
             messageId: expect.any(String),
           },
         );
+      });
+
+      it("does not start without the database", async () => {
+        mockDatabase.ready = Promise.reject(new Error("connection refused"));
+
+        await expect(
+          new CommonSettingsBridge({
+            ...mockConfig,
+            spaces,
+          }).start(),
+        ).rejects.toThrow("Spaces need the database: connection refused");
+      });
+
+      it("fails an event the database cannot check, so it is retried, and keeps the settings going", async () => {
+        const handler = await startWithSpaces();
+        mockDatabase.get.mockRejectedValue(new Error("connection terminated"));
+
+        await expect(
+          handler(created, {
+            routingKey: "twake.space.created.acme",
+            headers: {},
+          }),
+        ).rejects.toThrow("connection terminated");
+        expect(mockClient.publish).not.toHaveBeenCalled();
       });
 
       it("applies an event under the lock of its space, shared by the pods", async () => {

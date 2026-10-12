@@ -430,33 +430,26 @@ export class CommonSettingsBridge {
     }
   }
 
-  /** Without the database, like settings, space events apply without the ordering check. */
+  /**
+   * Spaces need the database, and never read the degraded mode of the
+   * settings: an event the database cannot answer fails and is retried, since
+   * applied without its checks it could undo a newer one or revive a deleted space.
+   */
   #createSpaceClock(): SpaceClock {
     return {
       latest: async (key) => {
-        if (!this.#isDatabaseAvailable) return null;
-        try {
-          const rows = await this.#db.get(
-            "spaceclock",
-            [
-              "timestamp",
-            ],
-            {
-              clock_key: key,
-            },
-          );
-          return rows.length > 0 ? Number(rows[0]!.timestamp) : null;
-        } catch (error) {
-          this.#log.error(
-            `Database error while reading ${key}: ${error instanceof Error ? error.message : String(error)}`,
-          );
-          this.#isDatabaseAvailable = false;
-          this.#log.warn("DATABASE ERROR - Switching to degraded mode");
-          return null;
-        }
+        const rows = await this.#db.get(
+          "spaceclock",
+          [
+            "timestamp",
+          ],
+          {
+            clock_key: key,
+          },
+        );
+        return rows.length > 0 ? Number(rows[0]?.timestamp) : null;
       },
       record: async (key, timestamp) => {
-        if (!this.#isDatabaseAvailable) return;
         // The change is already on the homeserver, so a failed write only loses the ordering check for this key
         try {
           const updated = await this.#db.update(
@@ -482,20 +475,15 @@ export class CommonSettingsBridge {
 
   /**
    * One event per space at a time: in this pod, then across the pods through
-   * the database. Without the database, two pods may change a space at once.
-   * An event the database cannot lock fails and is retried: applied without
-   * the lock, it could run beside the pod that holds it.
+   * the database. An event the database cannot lock fails and is retried:
+   * applied without the lock, it could run beside the pod that holds it.
    */
   #createSpaceLock(): SpaceLock {
     const inThisPod = createKeyedLock();
-    return (key, fn) => inThisPod(key, () => (this.#isDatabaseAvailable ? this.#db.withLock(key, fn) : fn()));
+    return (key, fn) => inThisPod(key, () => this.#db.withLock(key, fn));
   }
 
-  /**
-   * Without the database, the bridge cannot keep a deletion for 30 days or
-   * tell which spaces a sync left out, so those events fail and are retried.
-   * The nightly sync records the spaces provisioned in the meantime.
-   */
+  /** The Matrix space of each space, and when it is due for deletion. */
   #createSpaceRegistry(): SpaceRegistry {
     const fields = [
       "space_id",
@@ -515,11 +503,6 @@ export class CommonSettingsBridge {
       room_id: space.roomId ?? "",
       timestamp: space.timestamp,
     });
-    const requireDatabase = (): void => {
-      if (!this.#isDatabaseAvailable) {
-        throw new Error("the database is unavailable");
-      }
-    };
     const upsert = async (space: KnownSpace, values: Record<string, string | number>): Promise<void> => {
       const updated = await this.#db.update("spaces", values, "space_id", space.spaceId);
       if (updated.length === 0) {
@@ -531,18 +514,12 @@ export class CommonSettingsBridge {
       }
     };
     return {
-      remember: async (space) => {
-        if (!this.#isDatabaseAvailable) return;
-        try {
-          await upsert(space, rowOf(space));
-        } catch (error) {
-          this.#log.warn(
-            `Could not record space ${space.spaceId}: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-      },
+      remember: (space) =>
+        upsert(space, {
+          ...rowOf(space),
+          delete_at: 0,
+        }),
       deletionOf: async (spaceId) => {
-        if (!this.#isDatabaseAvailable) return null;
         const rows = await this.#db.get(
           "spaces",
           [
@@ -556,32 +533,27 @@ export class CommonSettingsBridge {
         return deleteAt > 0 ? deleteAt : null;
       },
       scheduleDeletion: async (space, at) => {
-        requireDatabase();
         await upsert(space, {
           ...rowOf(space),
           delete_at: at,
         });
       },
       spacesOf: async (organizationId) => {
-        requireDatabase();
         const rows = await this.#db.get("spaces", fields, {
           organization_id: organizationId,
         });
         return rows.filter((row) => Number(row.delete_at) === 0).map(toSpace);
       },
       dueBy: async (time) => {
-        if (!this.#isDatabaseAvailable) return [];
         const rows = await this.#db.getHigherThan("spaces", fields, {
           delete_at: 0,
         });
         return rows.filter((row) => Number(row.delete_at) <= time).map(toSpace);
       },
       forget: async (spaceId) => {
-        requireDatabase();
         await this.#db.deleteEqual("spaces", "space_id", spaceId);
       },
       hasSpaces: async (organizationId) => {
-        if (!this.#isDatabaseAvailable) return null;
         const rows = organizationId
           ? await this.#db.get("spaces", fields, {
               organization_id: organizationId,
@@ -685,6 +657,11 @@ export class CommonSettingsBridge {
         this.#isDatabaseAvailable = true;
       } catch (error) {
         this.#log.warn("==========================================");
+        if (this.#config.spaces) {
+          throw new Error(`Spaces need the database: ${error instanceof Error ? error.message : String(error)}`, {
+            cause: error,
+          });
+        }
         this.#log.warn("DATABASE UNAVAILABLE - Running in degraded mode");
         this.#log.warn("Idempotency and version checks disabled");
         this.#log.warn(`Error: ${error instanceof Error ? error.message : String(error)}`);
