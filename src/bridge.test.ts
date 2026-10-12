@@ -17,9 +17,18 @@ type AnyFn = (...args: any[]) => any;
 // Register the shared leaf-dependency mocks for this test file. The real
 // SettingsRepository and MatrixProfileUpdater run against these mocks and are
 // observed through prototype spies below.
-mock.module("matrix-appservice-bridge", () => ({ AppServiceRegistration, Bridge, Cli, Logger }));
-mock.module("@linagora/rabbitmq-client", () => ({ RabbitMQClient: MockRabbitMQClient }));
-mock.module("./db", () => ({ Database: MockDatabase }));
+mock.module("matrix-appservice-bridge", () => ({
+  AppServiceRegistration,
+  Bridge,
+  Cli,
+  Logger,
+}));
+mock.module("@linagora/rabbitmq-client", () => ({
+  RabbitMQClient: MockRabbitMQClient,
+}));
+mock.module("./db", () => ({
+  Database: MockDatabase,
+}));
 
 const { CommonSettingsBridge } = await import("./bridge");
 
@@ -37,6 +46,7 @@ describe("CommonSettingsBridge", () => {
     deleteEqual: Mock<AnyFn>;
     close: Mock<AnyFn>;
     ensureColumns: Mock<AnyFn>;
+    withLock: Mock<AnyFn>;
   };
   let mockClient: {
     init: Mock<AnyFn>;
@@ -89,6 +99,7 @@ describe("CommonSettingsBridge", () => {
       deleteEqual: mock().mockResolvedValue(undefined),
       close: mock(),
       ensureColumns: mock().mockResolvedValue(undefined),
+      withLock: mock((_key: string, fn: () => Promise<unknown>) => fn()),
     } as any;
     MockDatabase.mockImplementation(() => mockDatabase);
 
@@ -240,13 +251,23 @@ describe("CommonSettingsBridge", () => {
         request_id: "req-1",
         timestamp: 1,
         version: 1,
-        payload: { matrix_id: "@user:example.com" },
+        payload: {
+          matrix_id: "@user:example.com",
+        },
       });
 
       expect(mockDatabase.get).toHaveBeenCalledWith(
         "usersettings",
-        ["matrix_id", "settings", "version", "timestamp", "request_id"],
-        { matrix_id: "@user:example.com" },
+        [
+          "matrix_id",
+          "settings",
+          "version",
+          "timestamp",
+          "request_id",
+        ],
+        {
+          matrix_id: "@user:example.com",
+        },
       );
     });
 
@@ -257,13 +278,19 @@ describe("CommonSettingsBridge", () => {
       mockDatabase.get.mockResolvedValue([
         {
           matrix_id: "@user:example.com",
-          settings: JSON.stringify({ matrix_id: "@user:example.com", display_name: "Old Name" }),
+          settings: JSON.stringify({
+            matrix_id: "@user:example.com",
+            display_name: "Old Name",
+          }),
           version: 1,
           timestamp: Date.now() - 1000,
           request_id: "req-old",
         },
       ]);
-      mockIntent.setDisplayName.mockRejectedValueOnce({ errcode: "M_FORBIDDEN", message: "Forbidden" });
+      mockIntent.setDisplayName.mockRejectedValueOnce({
+        errcode: "M_FORBIDDEN",
+        message: "Forbidden",
+      });
 
       await handleMessageFn({
         source: "test-app",
@@ -271,7 +298,10 @@ describe("CommonSettingsBridge", () => {
         request_id: "req-2",
         timestamp: Date.now(),
         version: 2,
-        payload: { matrix_id: "@user:example.com", display_name: "New Name" },
+        payload: {
+          matrix_id: "@user:example.com",
+          display_name: "New Name",
+        },
       });
 
       // FALLBACK retry mode: M_FORBIDDEN on the intent API falls back to the admin API
@@ -450,10 +480,7 @@ describe("CommonSettingsBridge", () => {
           "chat.space.acme.queue",
           expect.any(Function),
           {
-            queueArguments: {
-              "x-single-active-consumer": true,
-            },
-            concurrency: 1,
+            concurrency: 4,
           },
         );
       });
@@ -481,6 +508,48 @@ describe("CommonSettingsBridge", () => {
             messageId: expect.any(String),
           },
         );
+      });
+
+      it("applies an event under the lock of its space, shared by the pods", async () => {
+        const handler = await startWithSpaces();
+        mockDatabase.withLock.mockImplementation((_key: string, fn: () => Promise<unknown>) => {
+          expect(mockClient.publish).not.toHaveBeenCalled();
+          return fn();
+        });
+
+        await handler(created, {
+          routingKey: "twake.space.created.acme",
+          headers: {},
+        });
+
+        expect(mockDatabase.withLock).toHaveBeenCalledWith("3b9e2c71", expect.any(Function));
+        expect(mockClient.publish).toHaveBeenCalledTimes(1);
+      });
+
+      it("fails an event whose space the database cannot lock, so it is retried", async () => {
+        const handler = await startWithSpaces();
+        mockDatabase.withLock.mockRejectedValue(new Error("canceling statement due to lock timeout"));
+
+        await expect(
+          handler(created, {
+            routingKey: "twake.space.created.acme",
+            headers: {},
+          }),
+        ).rejects.toThrow("lock timeout");
+        expect(mockClient.publish).not.toHaveBeenCalled();
+      });
+
+      it("fails an event that failed under the lock, without applying it again", async () => {
+        const handler = await startWithSpaces();
+        mockClient.publish.mockRejectedValue(new Error("RabbitMQ is down"));
+
+        await expect(
+          handler(created, {
+            routingKey: "twake.space.created.acme",
+            headers: {},
+          }),
+        ).rejects.toThrow("RabbitMQ is down");
+        expect(mockClient.publish).toHaveBeenCalledTimes(1);
       });
 
       it("records the members it applied, to ignore older events", async () => {
@@ -790,14 +859,7 @@ describe("CommonSettingsBridge", () => {
 
       await handleMessageFn(buildMessage());
 
-      expect(spySaveSettings).toHaveBeenCalledWith(
-        "@user:example.com",
-        mockPayload,
-        2,
-        1640995200000,
-        "req-123",
-        true,
-      );
+      expect(spySaveSettings).toHaveBeenCalledWith("@user:example.com", mockPayload, 2, 1640995200000, "req-123", true);
     });
 
     it("should save settings for existing user", async () => {

@@ -69,8 +69,16 @@ their Matrix space without waiting for the night.
   ```
 
 * The bridge bot is the only one at level 100, so membership and settings only
-  change through the directory. Editors, admins and TwakeSpace's user are at
-  50 and can post. Viewers stay at 0 and only read.
+  change through the directory. The level of a member follows their role in
+  the space:
+
+  | Role in the space | Level | In the Matrix space and General |
+  | --- | --- | --- |
+  | admin | 75 | posts, and removes the messages of others |
+  | editor | 50 | posts, joins a call, votes in a poll |
+  | viewer | 0 | reads only: no message, reaction, vote or call |
+
+  TwakeSpace's user is at 50.
 * A member without a Matrix account gets one, named the way the SSO mapping
   names it (`localpartFrom`). For that person to sign in, the homeserver's OIDC
   provider needs `allow_existing_users: true`.
@@ -93,19 +101,47 @@ which the space's aliases rule above also covers.
 
 ## Ordering
 
-The space queue has a single active consumer, and the bridge handles its
-events one at a time, so two pods never change the same space at once.
+Any number of pods consume the space queue, each up to 4 events at once. The
+events of different spaces run together. Those of one space run one at a time,
+on every pod:
 
-Events can still reach the bridge out of order, through retries. The bridge
-stores the timestamp of the last change it applied to each member and to the
-space name, and ignores an older event. Without the database, it applies every
-event.
+* Each event takes the lock of its space before it reads anything: a queue in
+  the pod, then a Postgres advisory lock (`pg_advisory_lock`) shared by the
+  pods of one database.
+* A pod that stops closes its connection, which releases its locks. RabbitMQ
+  then delivers its unacknowledged events to another pod.
+
+The lock is there because the events of a space change the same rooms, and
+Matrix writes the power levels of a room whole: of two changes made at once,
+one is lost. It also keeps a `created` event from adding members while the
+`deleted` event of the same space removes them.
+
+The lock does not order the events. They can reach the bridge out of order,
+through retries or because two pods took them together. The bridge stores the
+timestamp of the last change it applied to each member and to the space name,
+and ignores an older event. The lock makes that check and the change one step.
+
+Without the database, only the queue in the pod is left and no timestamp is
+stored: run a single pod, or two pods may change a space at once and an older
+event may undo a newer one, until the nightly sync.
+
+Each event holds one database connection for the time of its lock: 4 of the
+10 connections of the pool at most, and the others serve the queries. An event
+the database cannot lock fails and is retried, since without the lock it could
+run beside the pod that holds it.
+
+The space queue was declared with `x-single-active-consumer` by earlier
+versions of this branch. RabbitMQ refuses to declare a queue again with other
+arguments (`PRECONDITION_FAILED`), and the bridge then fails to start: delete
+that queue once it is empty, and the bridge declares it again.
 
 A member the SSO mapping cannot name (no username, or no usable email) is left
 out and logged, and the rest of the event goes ahead.
 
-A member event for a space without a Matrix space yet fails, and is retried
-until its `created` event has been handled or the retries run out.
+A member event for a space without a Matrix space yet waits for the lock while
+its `created` event runs. When that event has not arrived yet, the member event
+fails and is retried, 3 times a second apart by default, then ends in the
+dead-letter queue: the nightly sync adds the member.
 
 Once a space is deleted, the bridge ignores its events, since its id is never
 used again.

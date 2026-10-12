@@ -5,6 +5,7 @@ import type { Logger } from "matrix-appservice-bridge";
 import type { RabbitMQMessageProperties } from "@linagora/rabbitmq-client";
 
 import {
+  createKeyedLock,
   createSpaceEventHandler,
   eventName,
   type KnownSpace,
@@ -180,6 +181,7 @@ describe("createSpaceEventHandler", () => {
     return createSpaceEventHandler({
       matrix,
       clock,
+      lock: createKeyedLock(),
       registry,
       publish,
       domain: "acme.example",
@@ -688,6 +690,78 @@ describe("createSpaceEventHandler", () => {
       expect(matrix.join).not.toHaveBeenCalled();
       expect(matrix.kick).not.toHaveBeenCalled();
       expect(await registry.deletionOf(SPACE)).toBe(deleteAt);
+    });
+  });
+
+  describe("events at once", () => {
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+    it("applies the events of one space one at a time, and those of two spaces together", async () => {
+      matrix.findSpace.mockImplementation(async (spaceId: string) => `!${spaceId}:acme.example`);
+      const joining: string[] = [];
+      let sameSpaceTogether = false;
+      let twoSpacesTogether = false;
+      matrix.join.mockImplementation(async (roomId: string) => {
+        sameSpaceTogether ||= joining.includes(roomId);
+        twoSpacesTogether ||= joining.length > 0;
+        joining.push(roomId);
+        await tick();
+        joining.splice(joining.indexOf(roomId), 1);
+      });
+      const handle = handler();
+      const added = (id: string, member: Record<string, unknown>) =>
+        handle(
+          spaceEvent({
+            id,
+            members: [
+              member,
+            ],
+          }),
+          properties("member.added"),
+        );
+
+      await Promise.all([
+        added(SPACE, jdoe),
+        added(SPACE, viewer),
+        added("another-space", jdoe),
+      ]);
+
+      expect(sameSpaceTogether).toBe(false);
+      expect(twoSpacesTogether).toBe(true);
+    });
+
+    it("removes the members a created event added beside its deleted event", async () => {
+      matrix.findSpace.mockResolvedValueOnce(null);
+      matrix.members.mockResolvedValue([
+        "@jdoe:acme.example",
+      ]);
+      matrix.ensureUser.mockImplementation(tick);
+      const handle = handler();
+
+      await Promise.all([
+        handle(
+          spaceEvent({
+            name: "Design Sprint",
+            members: [
+              jdoe,
+            ],
+          }),
+          properties("created"),
+        ),
+        handle(spaceEvent({}), properties("deleted")),
+      ]);
+
+      // The creation went first and whole, so the deletion found its members to remove
+      expect(matrix.join.mock.invocationCallOrder.at(-1)).toBeLessThan(matrix.members.mock.invocationCallOrder[0]!);
+      expect(await registry.deletionOf(SPACE)).not.toBeNull();
+    });
+
+    it("goes on with a space after one of its events failed", async () => {
+      const lock = createKeyedLock();
+      const failed = lock(SPACE, () => Promise.reject(new Error("Synapse is down")));
+
+      expect(await lock(SPACE, async () => "applied")).toBe("applied");
+      await expect(failed).rejects.toThrow("Synapse is down");
     });
   });
 

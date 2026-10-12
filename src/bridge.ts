@@ -14,11 +14,13 @@ import {
 import { MatrixSpaces } from "./matrix-spaces";
 import { SettingsRepository } from "./settings-repository";
 import {
+  createKeyedLock,
   createSpaceEventHandler,
   type KnownSpace,
   purgeDeletedSpaces,
   requestFirstSync,
   type SpaceClock,
+  type SpaceLock,
   type SpaceRegistry,
 } from "./space-provisioner";
 import {
@@ -109,6 +111,7 @@ export function formatTimestamp(timestamp: number): string {
 }
 
 const PURGE_INTERVAL_MS = 60 * 60 * 1000;
+const SPACE_EVENTS_AT_ONCE = 4;
 
 Logger.configure({
   console: (process.env.LOG_LEVEL as "info" | "debug" | "warn" | "error" | "trace" | "off" | undefined) || "info",
@@ -478,6 +481,17 @@ export class CommonSettingsBridge {
   }
 
   /**
+   * One event per space at a time: in this pod, then across the pods through
+   * the database. Without the database, two pods may change a space at once.
+   * An event the database cannot lock fails and is retried: applied without
+   * the lock, it could run beside the pod that holds it.
+   */
+  #createSpaceLock(): SpaceLock {
+    const inThisPod = createKeyedLock();
+    return (key, fn) => inThisPod(key, () => (this.#isDatabaseAvailable ? this.#db.withLock(key, fn) : fn()));
+  }
+
+  /**
    * Without the database, the bridge cannot keep a deletion for 30 days or
    * tell which spaces a sync left out, so those events fail and are retried.
    * The nightly sync records the spaces provisioned in the meantime.
@@ -723,6 +737,7 @@ export class CommonSettingsBridge {
             createSpaceEventHandler({
               matrix,
               clock: this.#createSpaceClock(),
+              lock: this.#createSpaceLock(),
               registry,
               publish: (type, event) =>
                 this.#client.publish(spaces.activityExchange, type, event, {
@@ -732,12 +747,10 @@ export class CommonSettingsBridge {
               config: spaces,
               log: this.#log,
             }),
-            // One pod, one event at a time: power levels are read, changed and written back whole
+            // ponytail: each event holds a database connection for its space lock and queries on another,
+            // so half the pool (pg's default of 10) at most; pass the lock's connection to the queries to go higher
             {
-              queueArguments: {
-                "x-single-active-consumer": true,
-              },
-              concurrency: 1,
+              concurrency: SPACE_EVENTS_AT_ONCE,
             },
           );
           this.#log.info(`Provisioning Matrix spaces from ${spaces.exchange} / ${spaces.routingKey}`);

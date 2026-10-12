@@ -1428,6 +1428,44 @@ class Pg<T extends string> extends SQL<T> implements DbBackend<T> {
     this.logger.info(`[Pg][ensureColumns] Schema updated for "${table}"`);
   }
 
+  /**
+   * Holds a session advisory lock on `key` while `fn` runs, on a connection of
+   * its own: the pods of one database run one `fn` per key at a time. Session
+   * level, since a transaction left idle for the time of `fn` may be closed by
+   * the server. A pod that dies drops its connection, which releases the lock.
+   */
+  async withLock<R>(key: string, fn: () => Promise<R>): Promise<R> {
+    if (!this.db) {
+      throw new Error("DB not ready");
+    }
+    const client = await this.db.connect();
+    let unlocked = false;
+    try {
+      await client.query("SELECT pg_advisory_lock(hashtext('tom-bridge'), hashtext($1))", [
+        key,
+      ]);
+      try {
+        return await fn();
+      } finally {
+        await client
+          .query("SELECT pg_advisory_unlock(hashtext('tom-bridge'), hashtext($1))", [
+            key,
+          ])
+          .then(
+            () => {
+              unlocked = true;
+            },
+            (error: Error) => {
+              this.logger.warn(`[Pg][withLock] Could not unlock ${key}: ${error.message}`);
+            },
+          );
+      }
+    } finally {
+      // Closed when it may still hold the lock, which releases it
+      client.release(!unlocked);
+    }
+  }
+
   close(): void {
     void this.db?.end();
   }

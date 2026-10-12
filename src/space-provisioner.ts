@@ -90,11 +90,39 @@ export interface SpaceClock {
   record(key: string, timestamp: number): Promise<void>;
 }
 
+/**
+ * Runs `fn` while nothing else runs under the same key. The events of one
+ * space change the same rooms, and Matrix writes a room's power levels whole:
+ * two at once would lose a member's level, or let an older event pass a newer
+ * one between its ordering check and its change.
+ */
+export type SpaceLock = <T>(key: string, fn: () => Promise<T>) => Promise<T>;
+
+/** One `fn` per key at a time in this process, in the order they came. */
+export function createKeyedLock(): SpaceLock {
+  const tails = new Map<string, Promise<void>>();
+  return (key, fn) => {
+    const run = (tails.get(key) ?? Promise.resolve()).then(fn);
+    const tail = run.then(
+      () => {},
+      () => {},
+    );
+    tails.set(key, tail);
+    void tail.then(() => {
+      if (tails.get(key) === tail) {
+        tails.delete(key);
+      }
+    });
+    return run;
+  };
+}
+
 export type PublishActivity = (type: string, event: Record<string, unknown>) => Promise<void>;
 
 interface Deps {
   readonly matrix: SpaceMatrix;
   readonly clock: SpaceClock;
+  readonly lock: SpaceLock;
   readonly registry: SpaceRegistry;
   readonly publish: PublishActivity;
   readonly domain: string;
@@ -166,6 +194,7 @@ function levelOf(role: Role): number | null {
 export function createSpaceEventHandler({
   matrix,
   clock,
+  lock,
   registry,
   publish,
   domain,
@@ -427,18 +456,29 @@ export function createSpaceEventHandler({
     const listed = new Set(spaceIds.map((id: string) => id.toLowerCase()));
     for (const space of await registry.spacesOf(organizationId)) {
       if (!listed.has(space.spaceId) && space.timestamp < timestamp) {
-        await removeAccess(space, timestamp);
+        await lock(space.spaceId, () => removeAccess(space, timestamp));
       }
     }
   }
 
-  async function onSpaceEvent(
+  function onSpaceEvent(
     event: string,
     message: Record<string, unknown>,
     organizationId: string,
     timestamp: number,
-  ) {
+  ): Promise<void> {
     const spaceId = requireString(message, "id");
+    // The deletion is read under the lock too: a created event running beside its deleted one would add the members back
+    return lock(spaceId.toLowerCase(), () => applySpaceEvent(event, message, spaceId, organizationId, timestamp));
+  }
+
+  async function applySpaceEvent(
+    event: string,
+    message: Record<string, unknown>,
+    spaceId: string,
+    organizationId: string,
+    timestamp: number,
+  ) {
     // A deleted space id is never used again, so whatever arrives after the deletion is late
     if ((await registry.deletionOf(spaceId.toLowerCase())) !== null) {
       log.info(`Ignoring ${event} for the deleted space ${spaceId}`);
