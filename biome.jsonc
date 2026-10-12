@@ -149,5 +149,34 @@
         "noReExportAll": "warn"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      // Mocks and their assertions are loosely typed on purpose.
+      "includes": [
+        "src/**/*.test.ts",
+        "src/__mocks__/**"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    },
+    {
+      // The database layer keeps the positional signatures of the ToM database it comes from.
+      "includes": [
+        "src/db/**"
+      ],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "useMaxParams": "off"
+          }
+        }
+      }
+    }
+  ]
 }

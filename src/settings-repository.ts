@@ -274,6 +274,7 @@ export class SettingsRepository {
    * @param isNewUser - Whether this is a new user (insert) or existing user (update)
    * @throws Error if database operation fails
    */
+  // biome-ignore lint/complexity/useMaxParams: one argument per column of the cache row
   async saveSettings(
     userId: string,
     payload: ISettingsPayload,
@@ -298,7 +299,13 @@ export class SettingsRepository {
       } catch (error) {
         // Handle TOCTOU race: another request may have inserted first
         const errorMsg = error instanceof Error ? error.message.toLowerCase() : "";
-        const errorCode = (error as any)?.code;
+        const errorCode = (
+          error as
+            | {
+                code?: string;
+              }
+            | undefined
+        )?.code;
         const isDuplicateKey =
           errorMsg.includes("duplicate") ||
           errorMsg.includes("unique") ||
