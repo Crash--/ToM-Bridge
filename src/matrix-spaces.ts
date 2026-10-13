@@ -8,11 +8,12 @@ const BRIDGE_LEVEL = 100;
  * What a member of the space sends in Twake Chat beyond messages: joining a
  * call (a state event, MatrixRTC), the commands of a bot (MSC4332), a poll
  * vote (MSC3381) and a resolved thread. At the state level of the bridge, a
- * member could not join a call. A viewer reads only, and still reacts.
+ * member could not join a call. A viewer reads only, and still reacts and
+ * joins a call.
  */
 const MEMBER_EVENTS: Record<string, number> = {
   "m.reaction": 0,
-  "org.matrix.msc3401.call.member": POSTER_LEVEL,
+  "org.matrix.msc3401.call.member": 0,
   "org.matrix.msc4332.commands": POSTER_LEVEL,
   "m.bot.commands": POSTER_LEVEL,
   "org.matrix.msc3381.poll.response": POSTER_LEVEL,
@@ -273,14 +274,15 @@ export class MatrixSpaces implements SpaceMatrix {
     const users: Record<string, number> = {
       ...powerLevels.users,
     };
-    // Rooms created before an event got its level get it on their next change
+    // Rooms created before an event got its level, or with a former one, get it on their next change
+    const current: Record<string, number> = powerLevels.events ?? {};
     const events: Record<string, number> = {
+      ...current,
       ...MEMBER_EVENTS,
       ...(isSpace ? SPACE_EVENTS : {}),
-      ...powerLevels.events,
     };
     let changed =
-      Object.keys(events).length !== Object.keys(powerLevels.events ?? {}).length ||
+      Object.entries(events).some(([type, level]) => current[type] !== level) ||
       powerLevels.redact !== MODERATOR_LEVEL;
     for (const [matrixId, level] of changes) {
       if (level === null && matrixId in users) {

@@ -80,8 +80,8 @@ their Matrix space without waiting for the night.
   | Role in the space | Level | In the Matrix space and General |
   | --- | --- | --- |
   | admin | 75 | as an editor, and removes the messages of others |
-  | editor | 50 | posts, joins a call, votes in a poll, adds a channel |
-  | viewer | 0 | reads and reacts: no message, vote or call |
+  | editor | 50 | posts, votes in a poll, adds a channel |
+  | viewer | 0 | reads, reacts and joins a call: no message or vote |
 
   A role the bridge does not know reads only, like a viewer. Adding a channel
   is `m.space.child` at 50, in the Matrix space only. The bridge does not keep

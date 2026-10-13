@@ -72,7 +72,7 @@ describe("MatrixSpaces", () => {
         },
         events_default: 50,
         events: {
-          "org.matrix.msc3401.call.member": 50,
+          "org.matrix.msc3401.call.member": 0,
         },
         invite: 100,
         kick: 100,
@@ -235,7 +235,7 @@ describe("MatrixSpaces", () => {
       },
       events_default: 50,
       events: expect.objectContaining({
-        "org.matrix.msc3401.call.member": 50,
+        "org.matrix.msc3401.call.member": 0,
       }),
       redact: 75,
     });
@@ -262,8 +262,37 @@ describe("MatrixSpaces", () => {
     const [, , , content] = client.sendStateEvent.mock.calls[0]!;
     expect(content.events).toMatchObject({
       "m.room.name": 100,
-      "org.matrix.msc3401.call.member": 50,
+      "org.matrix.msc3401.call.member": 0,
     });
+  });
+
+  it("lets the viewers of a space made when a call needed an editor join it", async () => {
+    client.getRoomStateEvent.mockResolvedValue({
+      users: {
+        "@jdoe:acme.example": 50,
+      },
+      events: {
+        "m.reaction": 0,
+        "org.matrix.msc3401.call.member": 50,
+        "org.matrix.msc4332.commands": 50,
+        "m.bot.commands": 50,
+        "org.matrix.msc3381.poll.response": 50,
+        "m.poll.response": 50,
+        "app.twake.chat.thread_resolved": 50,
+      },
+      redact: 75,
+    });
+
+    await spaces.setPowerLevels(
+      ROOM,
+      {
+        "@jdoe:acme.example": 50,
+      },
+      false,
+    );
+
+    const [, , , content] = client.sendStateEvent.mock.calls[0]!;
+    expect(content.events["org.matrix.msc3401.call.member"]).toBe(0);
   });
 
   it("sends nothing when the levels already match", async () => {
@@ -273,7 +302,7 @@ describe("MatrixSpaces", () => {
       },
       events: {
         "m.reaction": 0,
-        "org.matrix.msc3401.call.member": 50,
+        "org.matrix.msc3401.call.member": 0,
         "org.matrix.msc4332.commands": 50,
         "m.bot.commands": 50,
         "org.matrix.msc3381.poll.response": 50,
@@ -313,7 +342,7 @@ describe("MatrixSpaces", () => {
     client.getRoomStateEvent.mockResolvedValue({
       users: {},
       events: {
-        "org.matrix.msc3401.call.member": 50,
+        "org.matrix.msc3401.call.member": 0,
       },
     });
 
