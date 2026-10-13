@@ -282,8 +282,7 @@ export class MatrixSpaces implements SpaceMatrix {
       ...(isSpace ? SPACE_EVENTS : {}),
     };
     let changed =
-      Object.entries(events).some(([type, level]) => current[type] !== level) ||
-      powerLevels.redact !== MODERATOR_LEVEL;
+      Object.entries(events).some(([type, level]) => current[type] !== level) || powerLevels.redact !== MODERATOR_LEVEL;
     for (const [matrixId, level] of changes) {
       if (level === null && matrixId in users) {
         delete users[matrixId];
