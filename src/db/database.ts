@@ -54,8 +54,8 @@ class Database<T extends string> implements DbBackend<T> {
     });
   }
 
-  createDatabases(conf: DatabaseConfig, ...args: any): Promise<void> {
-    return this.db.createDatabases(conf, ...args);
+  createDatabases(...args: Parameters<DbBackend<T>["createDatabases"]>): Promise<void> {
+    return this.db.createDatabases(...args);
   }
 
   insert(table: T, values: Record<string, string | number>): Promise<DbGetResult> {

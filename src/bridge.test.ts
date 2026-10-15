@@ -1,25 +1,34 @@
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn, type Mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, type Mock, mock, spyOn } from "bun:test";
 
-import { MatrixProfileUpdater } from "./matrix-profile-updater";
-import { SettingsRepository } from "./settings-repository";
-import type { BridgeConfig, ISettingsPayload, StoredUserSettings } from "./types";
 import {
   AppServiceRegistration,
   Bridge,
   Cli,
-  Database as MockDatabase,
   Logger,
+  Database as MockDatabase,
   RabbitMQClient as MockRabbitMQClient,
 } from "./__mocks__/shared";
+import { MatrixProfileUpdater } from "./matrix-profile-updater";
+import { SettingsRepository } from "./settings-repository";
+import type { BridgeConfig, ISettingsPayload, StoredUserSettings } from "./types";
 
 type AnyFn = (...args: any[]) => any;
 
 // Register the shared leaf-dependency mocks for this test file. The real
 // SettingsRepository and MatrixProfileUpdater run against these mocks and are
 // observed through prototype spies below.
-mock.module("matrix-appservice-bridge", () => ({ AppServiceRegistration, Bridge, Cli, Logger }));
-mock.module("@linagora/rabbitmq-client", () => ({ RabbitMQClient: MockRabbitMQClient }));
-mock.module("./db", () => ({ Database: MockDatabase }));
+mock.module("matrix-appservice-bridge", () => ({
+  AppServiceRegistration,
+  Bridge,
+  Cli,
+  Logger,
+}));
+mock.module("@linagora/rabbitmq-client", () => ({
+  RabbitMQClient: MockRabbitMQClient,
+}));
+mock.module("./db", () => ({
+  Database: MockDatabase,
+}));
 
 const { CommonSettingsBridge } = await import("./bridge");
 
@@ -234,13 +243,23 @@ describe("CommonSettingsBridge", () => {
         request_id: "req-1",
         timestamp: 1,
         version: 1,
-        payload: { matrix_id: "@user:example.com" },
+        payload: {
+          matrix_id: "@user:example.com",
+        },
       });
 
       expect(mockDatabase.get).toHaveBeenCalledWith(
         "usersettings",
-        ["matrix_id", "settings", "version", "timestamp", "request_id"],
-        { matrix_id: "@user:example.com" },
+        [
+          "matrix_id",
+          "settings",
+          "version",
+          "timestamp",
+          "request_id",
+        ],
+        {
+          matrix_id: "@user:example.com",
+        },
       );
     });
 
@@ -251,13 +270,19 @@ describe("CommonSettingsBridge", () => {
       mockDatabase.get.mockResolvedValue([
         {
           matrix_id: "@user:example.com",
-          settings: JSON.stringify({ matrix_id: "@user:example.com", display_name: "Old Name" }),
+          settings: JSON.stringify({
+            matrix_id: "@user:example.com",
+            display_name: "Old Name",
+          }),
           version: 1,
           timestamp: Date.now() - 1000,
           request_id: "req-old",
         },
       ]);
-      mockIntent.setDisplayName.mockRejectedValueOnce({ errcode: "M_FORBIDDEN", message: "Forbidden" });
+      mockIntent.setDisplayName.mockRejectedValueOnce({
+        errcode: "M_FORBIDDEN",
+        message: "Forbidden",
+      });
 
       await handleMessageFn({
         source: "test-app",
@@ -265,7 +290,10 @@ describe("CommonSettingsBridge", () => {
         request_id: "req-2",
         timestamp: Date.now(),
         version: 2,
-        payload: { matrix_id: "@user:example.com", display_name: "New Name" },
+        payload: {
+          matrix_id: "@user:example.com",
+          display_name: "New Name",
+        },
       });
 
       // FALLBACK retry mode: M_FORBIDDEN on the intent API falls back to the admin API
@@ -595,14 +623,7 @@ describe("CommonSettingsBridge", () => {
 
       await handleMessageFn(buildMessage());
 
-      expect(spySaveSettings).toHaveBeenCalledWith(
-        "@user:example.com",
-        mockPayload,
-        2,
-        1640995200000,
-        "req-123",
-        true,
-      );
+      expect(spySaveSettings).toHaveBeenCalledWith("@user:example.com", mockPayload, 2, 1640995200000, "req-123", true);
     });
 
     it("should save settings for existing user", async () => {

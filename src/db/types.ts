@@ -1,5 +1,7 @@
 import type { ConnectionOptions } from "node:tls";
 
+import type { Logger as PinoLogger } from "pino";
+
 export type SupportedDatabases = "sqlite" | "pg";
 
 export interface DatabaseConfig {
@@ -145,9 +147,17 @@ type AddColumn<T> = (table: T, column: ColumnDefinition) => Promise<void>;
 
 type EnsureColumns<T> = (table: T, columns: ColumnDefinition[]) => Promise<void>;
 
-export interface DbBackend<T> {
+type CreateDatabases<T extends string> = (
+  conf: DatabaseConfig,
+  tables: Record<T, string>,
+  indexes: Partial<Record<T, string[]>>,
+  initializeValues: Partial<Record<T, Array<Record<string, string | number>>>>,
+  logger: PinoLogger,
+) => Promise<void>;
+
+export interface DbBackend<T extends string> {
   ready: Promise<void>;
-  createDatabases: (conf: DatabaseConfig, ...args: any) => Promise<void>;
+  createDatabases: CreateDatabases<T>;
   insert: Insert<T>;
   get: Get<T>;
   getJoin: GetJoin<T>;

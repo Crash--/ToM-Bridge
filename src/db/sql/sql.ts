@@ -31,7 +31,7 @@ abstract class SQL<T extends string> {
 
   getCount(table: T, field: string, value?: string | number | string[]): Promise<number> {
     return new Promise((resolve, reject) => {
-      const args: any[] = [
+      const args: unknown[] = [
         table,
         [
           `count(${field}) as count`,
@@ -46,7 +46,7 @@ abstract class SQL<T extends string> {
         .then((rows: Array<Record<string, string>>) => {
           resolve(parseInt(rows[0]!.count!, 10));
         })
-        .catch((e: any) => {
+        .catch((e: unknown) => {
           /* istanbul ignore next */
           reject(e);
         });

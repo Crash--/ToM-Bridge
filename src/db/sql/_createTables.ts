@@ -22,7 +22,7 @@ function createTables<T extends string>(
               db.rawQuery(`CREATE TABLE ${table}(${tables[table]})`)
                 .then(() =>
                   Promise.all(
-                    (indexes[table] ? (indexes[table] as string[]) : []).map<Promise<any>>((index) =>
+                    (indexes[table] ? (indexes[table] as string[]) : []).map<Promise<unknown>>((index) =>
                       db.rawQuery(`CREATE INDEX i_${table}_${index} ON ${table} (${index})`).catch((e) => {
                         /* istanbul ignore next */
                         logger.error(e, `Index ${index}`);
@@ -35,7 +35,7 @@ function createTables<T extends string>(
                     (initializeValues[table]
                       ? (initializeValues[table] as Array<Record<string, string | number>>)
                       : []
-                    ).map<Promise<any>>((entry) => db.insert(table, entry)),
+                    ).map<Promise<unknown>>((entry) => db.insert(table, entry)),
                   ),
                 )
                 .then(() => {

@@ -2,6 +2,12 @@ import type { Intent, Logger } from "matrix-appservice-bridge";
 
 import { AvatarFetchError, type ISettingsPayload, SynapseAdminRetryMode } from "./types";
 
+/** What a failed Matrix request carries, as far as this file reads it. */
+type MatrixError = {
+  errcode?: string;
+  message?: string;
+};
+
 /**
  * Default maximum allowed avatar file size (5MB).
  * Prevents memory exhaustion from malicious or oversized external URLs.
@@ -94,7 +100,8 @@ export class MatrixProfileUpdater {
       this.logger.debug(`Attempting standard API display name update for ${userId}`);
       await intent.setDisplayName(newDisplayname);
       this.logger.info(`Updated display name for ${userId} to "${newDisplayname}"`);
-    } catch (err: any) {
+    } catch (caught) {
+      const err = caught as MatrixError | undefined;
       this.logger.warn(
         `Failed to update display name via standard API for ${userId}: ${
           err?.errcode || err?.message || "Unknown error"
@@ -250,7 +257,8 @@ export class MatrixProfileUpdater {
       const mxcUrl = await intent.matrixClient.uploadContent(buffer, contentType, "avatar");
       this.logger.info(`Uploaded avatar to Synapse for ${userId}: ${mxcUrl}`);
       return mxcUrl;
-    } catch (error: any) {
+    } catch (caught) {
+      const error = caught as MatrixError | undefined;
       // In FALLBACK mode, try bot upload on M_FORBIDDEN
       if (
         (error?.errcode === "M_FORBIDDEN" || error?.errcode === "M_EXCLUSIVE") &&
@@ -294,7 +302,8 @@ export class MatrixProfileUpdater {
       this.logger.debug(`Attempting standard API avatar update for ${userId}`);
       await intent.setAvatarUrl(resolvedUrl);
       this.logger.info(`Updated avatar for ${userId} to "${resolvedUrl}"`);
-    } catch (err: any) {
+    } catch (caught) {
+      const err = caught as MatrixError | undefined;
       this.logger.warn(
         `Failed to update avatar via standard API for ${userId}: ${err?.errcode || err?.message || "Unknown error"}`,
       );

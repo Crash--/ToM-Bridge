@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/promise-function-async */
 import { beforeAll, beforeEach, describe, expect, it, mock } from "bun:test";
-import type { BridgeConfig } from "./types";
+
 import {
   AppServiceRegistration,
   Bridge as MockBridge,
@@ -9,11 +9,21 @@ import {
   Logger as MockLogger,
   RabbitMQClient as MockRabbitMQClient,
 } from "./__mocks__/shared";
+import type { BridgeConfig } from "./types";
 
 // Register the shared leaf-dependency mocks for this test file
-mock.module("matrix-appservice-bridge", () => ({ AppServiceRegistration, Bridge: MockBridge, Cli: MockCli, Logger: MockLogger }));
-mock.module("@linagora/rabbitmq-client", () => ({ RabbitMQClient: MockRabbitMQClient }));
-mock.module("./db", () => ({ Database: MockDatabase }));
+mock.module("matrix-appservice-bridge", () => ({
+  AppServiceRegistration,
+  Bridge: MockBridge,
+  Cli: MockCli,
+  Logger: MockLogger,
+}));
+mock.module("@linagora/rabbitmq-client", () => ({
+  RabbitMQClient: MockRabbitMQClient,
+}));
+mock.module("./db", () => ({
+  Database: MockDatabase,
+}));
 
 const mockUploadContentFromUrl = mock(() => Promise.resolve("mxc://example.com/uploaded123"));
 const mockUploadContent = mock(() => Promise.resolve("mxc://example.com/uploaded123"));
