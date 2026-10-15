@@ -1,6 +1,7 @@
 /* istanbul ignore file */
-import type { Logger as PinoLogger } from "pino";
+
 import type { ClientConfig, Pool as PgPool } from "pg";
+import type { Logger as PinoLogger } from "pino";
 
 import type { ColumnDefinition, ColumnInfo, DatabaseConfig, DbBackend, DbGetResult, ISQLCondition } from "../types";
 import createTables from "./_createTables";
@@ -104,7 +105,7 @@ class Pg<T extends string> extends SQL<T> implements DbBackend<T> {
     });
   }
 
-  rawQuery(query: string): Promise<any> {
+  rawQuery(query: string): Promise<unknown> {
     if (!this.db) {
       this.logger.error("[Pg][rawQuery] DB not ready");
       return Promise.reject(new Error("DB not ready"));
@@ -483,7 +484,7 @@ class Pg<T extends string> extends SQL<T> implements DbBackend<T> {
           },
           "[Pg][_get] Executing SELECT",
         );
-        this.db.query(query, values, (err: any, rows: any) => {
+        this.db.query(query, values, (err, rows) => {
           if (err) {
             this.logger.error(
               {
@@ -1383,7 +1384,7 @@ class Pg<T extends string> extends SQL<T> implements DbBackend<T> {
     /* Capture db reference to avoid undefined in callback */
     const db = this.db;
 
-    return new Promise((resolve, reject) => {
+    return await new Promise((resolve, reject) => {
       db.query(query, (err) => {
         if (err) {
           const pgError = err as {

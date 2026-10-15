@@ -1258,7 +1258,7 @@ class SQLite<T extends string> extends SQL<T> implements DbBackend<T> {
     /* Capture db reference to avoid undefined in callback */
     const db = this.db;
 
-    return new Promise((resolve, reject) => {
+    return await new Promise((resolve, reject) => {
       db.all(
         query,
         (
@@ -1418,7 +1418,7 @@ class SQLite<T extends string> extends SQL<T> implements DbBackend<T> {
     /* Capture db reference to avoid undefined in callback */
     const db = this.db;
 
-    return new Promise((resolve, reject) => {
+    return await new Promise((resolve, reject) => {
       /*
        * Note: SQLite ALTER TABLE doesn't support parameterized DEFAULT values.
        * If we have params, we need to use a workaround or fall back to escaping.

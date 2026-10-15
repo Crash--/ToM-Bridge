@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, jest, mock, spyOn, type Mock } from "bun:test";
+import { beforeEach, describe, expect, it, jest, type Mock, mock } from "bun:test";
 
 import { type MatrixApis, MatrixProfileUpdater } from "./matrix-profile-updater";
 import { type ISettingsPayload, SynapseAdminRetryMode } from "./types";

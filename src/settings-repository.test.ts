@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock, type Mock } from "bun:test";
+import { beforeEach, describe, expect, it, type Mock, mock } from "bun:test";
 
 import { SettingsRepository } from "./settings-repository";
 import type { ISettingsPayload, UserSettingsTableName } from "./types";
