@@ -3,10 +3,10 @@ import { beforeAll, beforeEach, describe, expect, it, mock } from "bun:test";
 
 import {
   AppServiceRegistration,
+  DeadLetterError,
   Bridge as MockBridge,
   Cli as MockCli,
   Database as MockDatabase,
-  DeadLetterError,
   Logger as MockLogger,
   RabbitMQClient as MockRabbitMQClient,
 } from "./__mocks__/shared";
