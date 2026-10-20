@@ -41,7 +41,7 @@ export interface SpaceMatrix {
   findGeneral(spaceId: string): Promise<string | null>;
   /** Finds or creates the space's General room, which its members only join, and makes sure the Matrix space lists it. */
   ensureGeneral(spaceId: string, spaceRoomId: string): Promise<string>;
-  ensureUser(matrixId: string, displayName: string): Promise<void>;
+  ensureUser(matrixId: string, displayName: string, email?: string): Promise<void>;
   join(roomId: string, matrixId: string): Promise<void>;
   /** Removes a member, doing nothing when they are not in the room. */
   kick(roomId: string, matrixId: string): Promise<void>;
@@ -177,6 +177,10 @@ function membersOf(message: Record<string, unknown>): SpaceMember[] {
   return members as SpaceMember[];
 }
 
+function emailOf(member: SpaceMember): string | undefined {
+  return typeof member.email === "string" && member.email.includes("@") ? member.email : undefined;
+}
+
 function displayNameOf(member: NamedMember): string {
   return (
     [
@@ -303,7 +307,7 @@ export function createSpaceEventHandler({
     for (const member of members) {
       const { matrixId } = member;
       const applied = await forMember(spaceId, matrixId, timestamp, async () => {
-        await matrix.ensureUser(matrixId, displayNameOf(member));
+        await matrix.ensureUser(matrixId, displayNameOf(member), emailOf(member));
         for (const roomId of rooms) {
           await matrix.join(roomId, matrixId);
         }

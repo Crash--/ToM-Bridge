@@ -156,6 +156,22 @@ describe("MatrixSpaces", () => {
     });
   });
 
+  it("creates the account with the e-mail of the member, for the calls of ToM", async () => {
+    client.doRequest.mockImplementationOnce(() => Promise.reject(matrixError(404, "M_NOT_FOUND")));
+
+    await spaces.ensureUser("@jdoe:acme.example", "John Doe", "JDoe@acme.example");
+
+    expect(client.doRequest).toHaveBeenLastCalledWith("PUT", "/_synapse/admin/v2/users/%40jdoe%3Aacme.example", null, {
+      displayname: "John Doe",
+      threepids: [
+        {
+          medium: "email",
+          address: "jdoe@acme.example",
+        },
+      ],
+    });
+  });
+
   it("leaves an existing account as it is", async () => {
     await spaces.ensureUser("@jdoe:acme.example", "John Doe");
 

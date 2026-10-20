@@ -219,7 +219,11 @@ export class MatrixSpaces implements SpaceMatrix {
     }
   }
 
-  async ensureUser(matrixId: string, displayName: string): Promise<void> {
+  /**
+   * Creates the account of a member Synapse does not know yet. Its e-mail goes with it: the SSO
+   * later maps the person to this account and adds none, and ToM needs one to start a call.
+   */
+  async ensureUser(matrixId: string, displayName: string, email?: string): Promise<void> {
     const path = `/_synapse/admin/v2/users/${encodeURIComponent(matrixId)}`;
     try {
       await this.#client.doRequest("GET", path);
@@ -230,6 +234,16 @@ export class MatrixSpaces implements SpaceMatrix {
       // Without a password: the person signs in through SSO, which maps to this same account
       await this.#client.doRequest("PUT", path, null, {
         displayname: displayName,
+        ...(email
+          ? {
+              threepids: [
+                {
+                  medium: "email",
+                  address: email.toLowerCase(),
+                },
+              ],
+            }
+          : {}),
       });
     }
   }
