@@ -5,7 +5,7 @@
     "": {
       "name": "@twake/tom-bridge",
       "dependencies": {
-        "@linagora/rabbitmq-client": "^0.2.1",
+        "@linagora/rabbitmq-client": "^0.6.0",
         "matrix-appservice-bridge": "12.0.0",
         "pg": "^8.23.0",
         "pino": "^10.3.1",
@@ -61,7 +61,7 @@
 
     "@isaacs/fs-minipass": ["@isaacs/fs-minipass@4.0.1", "", { "dependencies": { "minipass": "^7.0.4" } }, "sha512-wgm9Ehl2jpeqP3zw/7mo3kRHFp5MEDhqAdwy1fTGkHAwnkGOVsgpvQhL8B5n1qlb01jV3n/bI0ZfZp5lWA1k4w=="],
 
-    "@linagora/rabbitmq-client": ["@linagora/rabbitmq-client@0.2.2", "", { "dependencies": { "amqplib": "^0.10.7" } }, "sha512-eTgnfI0k1mf6uYqEliD1/CL0S7k62mc6aaQ4xP8TJEdKNPRjy+wX1qKzP1elt2rjngzIBvYMb4N/la2jI77Qow=="],
+    "@linagora/rabbitmq-client": ["@linagora/rabbitmq-client@0.6.0", "", { "dependencies": { "amqplib": "^0.10.7" } }, "sha512-NoBPvNL69hDUbZptSwJXox21RMet/FvJJZ3D9Dlo1QEgWzIG/TNeXRQBZVuJRgAGiEiOzm1muipNeY4CkR931Q=="],
 
     "@matrix-org/matrix-sdk-crypto-nodejs": ["@matrix-org/matrix-sdk-crypto-nodejs@0.6.6", "", { "dependencies": { "https-proxy-agent": "^7.0.5", "node-downloader-helper": "^2.1.9" } }, "sha512-JlYSjq9Sm/0QoUXfk6C7JppsOG0ESY8BHEIaQgjQ8iQ0GkhvJrhPZbMJmd77/Bgeahd1GENf8896nauf4ximzQ=="],
 

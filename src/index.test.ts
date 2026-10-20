@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, mock } from "bun:test";
 
 import {
   AppServiceRegistration,
+  DeadLetterError,
   Bridge as MockBridge,
   Cli as MockCli,
   Database as MockDatabase,
@@ -20,6 +21,7 @@ mock.module("matrix-appservice-bridge", () => ({
 }));
 mock.module("@linagora/rabbitmq-client", () => ({
   RabbitMQClient: MockRabbitMQClient,
+  DeadLetterError,
 }));
 mock.module("./db", () => ({
   Database: MockDatabase,

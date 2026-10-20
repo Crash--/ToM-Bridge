@@ -147,6 +147,9 @@ type AddColumn<T> = (table: T, column: ColumnDefinition) => Promise<void>;
 
 type EnsureColumns<T> = (table: T, columns: ColumnDefinition[]) => Promise<void>;
 
+/** Runs `fn` while no one else on this database runs one under the same key. */
+type WithLock = <R>(key: string, fn: () => Promise<R>) => Promise<R>;
+
 type CreateDatabases<T extends string> = (
   conf: DatabaseConfig,
   tables: Record<T, string>,
@@ -180,5 +183,6 @@ export interface DbBackend<T extends string> {
   getTableColumns: GetTableColumns<T>;
   addColumn: AddColumn<T>;
   ensureColumns: EnsureColumns<T>;
+  withLock: WithLock;
   close: () => void;
 }

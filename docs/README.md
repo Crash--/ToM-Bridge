@@ -12,6 +12,8 @@ this folder contains overall details about this project; ADR, User Guides, etc.
   image, and how to configure it through the config and registration files.
 * [Configuration](./Configuration.md) - the bridge runtime configuration and
   the Synapse Application Service registration.
+* [Spaces](./Spaces.md) - the Matrix space of each TwakeSpace space, and how
+  the bridge keeps its members in line with the directory.
 * [Development](./Development.md) - helper scripts and tinkering tips for
   developers.
 * [Release](./Release.md) - the branch naming convention and the release

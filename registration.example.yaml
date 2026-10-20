@@ -73,8 +73,11 @@ namespaces:
       regex: '@.*'
   # Room namespace: not used by this bridge (empty list)
   rooms: []
-  # Alias namespace: not used by this bridge (empty list)
-  aliases: []
+  # Alias namespace: the aliases of the rooms the bridge creates for spaces,
+  # needed with a 'spaces' block in the config. Escape the dots of the domain.
+  aliases:
+    - exclusive: true
+      regex: '#twake-space-.*:your\.homeserver\.com'
 
 # Rate limiting - disabled for internal bridge services
 # The bridge communicates via RabbitMQ, not HTTP, so rate limiting is not

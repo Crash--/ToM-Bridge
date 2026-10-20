@@ -54,3 +54,24 @@ rabbitmq:
 #   # What the homeserver's SSO mapping named accounts after: 'uid' (the
 #   # message's userId) or 'email' (the local part of its internalEmail)
 #   localpartFrom: 'uid'
+
+# Matrix spaces for TwakeSpace spaces (optional, off when omitted)
+# Creates a Matrix space per space and keeps its members in line with their
+# roles. Needs the bridge bot to be a homeserver admin.
+# spaces:
+#   # In SaaS the chat control plane forwards each organization's space events
+#   # here; a single installation binds 'twake.space.#' on 'space' directly.
+#   exchange: 'cs.instances.out.exchange'
+#   routingKey: 'twake.space.#.<organization id>'
+#   queue: 'chat.space.<organization id>.queue'
+#   # Where the bridge announces each space's Matrix space
+#   activityExchange: 'activity'
+#   # What the homeserver's SSO mapping named accounts after: 'uid' (the
+#   # member's username) or 'email' (the local part of their email)
+#   localpartFrom: 'uid'
+#   # TwakeSpace's app service user (default: '@twakespace:<domain>')
+#   # twakeSpaceUserId: '@twakespace:example.com'
+#   # Where to request a sync of the directory while the bridge knows no space
+#   # (off when omitted), and for which organization (every one when omitted)
+#   # syncRequestExchange: 'space'
+#   # organizationId: '<organization id>'

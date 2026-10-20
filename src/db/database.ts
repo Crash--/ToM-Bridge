@@ -236,6 +236,10 @@ class Database<T extends string> implements DbBackend<T> {
     return this.db.ensureColumns(table, columns);
   }
 
+  withLock<R>(key: string, fn: () => Promise<R>): Promise<R> {
+    return this.db.withLock(key, fn);
+  }
+
   close(): void {
     this.db.close();
   }

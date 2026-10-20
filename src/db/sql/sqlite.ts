@@ -1508,6 +1508,11 @@ class SQLite<T extends string> extends SQL<T> implements DbBackend<T> {
     );
   }
 
+  // A SQLite file serves one process, which orders its own work
+  withLock<R>(_key: string, fn: () => Promise<R>): Promise<R> {
+    return fn();
+  }
+
   close(): void {
     this.db?.close();
   }
