@@ -2,28 +2,31 @@
 
 With a `spaces` block in its config, the bridge gives each TwakeSpace space a
 Matrix space on the organization's homeserver, and keeps its members in line
-with their roles in the directory.
+with their roles in the space.
 
 ```mermaid
 sequenceDiagram
-  participant L as ldap-rest
-  participant C as chat control plane
+  participant E as space events
   participant B as tom-bridge
   participant S as Synapse
   participant T as TwakeSpace
-  L->>C: space exchange, twake.space.created
-  C->>B: cs.instances.out.exchange, twake.space.created.<org>
+  E->>B: twake.space.created
   B->>S: create the Matrix space and its General room, add the members
   B->>T: activity exchange, com.twake.chat.space.provisioned.v1
 ```
 
 ## Events
 
-ldap-rest publishes the space events of every organization on the `space`
-exchange. In SaaS, the chat control plane forwards each one to its
-organization's bridge with the organization id appended to the routing key, so
-a bridge only receives its own. A single installation binds `twake.space.#` on
-`space` directly.
+The bridge receives the space events on the queue of its `spaces` block. Their
+routing key is `twake.space.<event>`:
+
+* In SaaS, each organization has its own bridge, and the routing key ends with
+  the organization id (`twake.space.<event>.<organization id>`). A bridge only
+  receives the events of its organization.
+* In a single installation, the bridge binds `twake.space.#` and receives every
+  space event, without the organization id.
+
+The bridge handles both forms the same way, and reacts to these events:
 
 * `created` - creates the Matrix space, adds TwakeSpace's app service user and
   the members, then publishes `com.twake.chat.space.provisioned.v1` with the
@@ -37,19 +40,19 @@ a bridge only receives its own. A single installation binds `twake.space.#` on
   days later.
 * `synced` - carries the whole space. The bridge handles it like `created`, and
   also renames the Matrix space and removes the members it no longer lists.
-* `sync.completed` - lists the organization's spaces. The bridge removes the
-  members of each Matrix space it provisioned before the sync whose space is no
-  longer listed, and deletes it 30 days later, as for `deleted`.
-* Group events are ignored: ldap-rest also publishes a member event for each
-  user a group change affects.
+* `sync.completed` - ends a sync, with the ids of every space that still
+  exists. A space the bridge provisioned before the sync and missing from this
+  list was deleted while the bridge missed its `deleted` event: the bridge
+  handles it as `deleted`.
+* Group events are ignored: a group change also arrives as one member event per
+  user it affects.
 
 An event the bridge cannot read (no organization, space id, timestamp or
 members, a member without `uuid`, a space id ending in `-general`) goes to the
 dead-letter queue at once, without a retry.
 
-ldap-rest publishes `synced` and `sync.completed` for every organization each
-night, and on request
-([linagora/ldap-rest@32f96d0](https://github.com/linagora/ldap-rest/blob/32f96d0f1314543f6d5bb913d1d6d8ac70bdc697/src/plugins/twake/spaces.ts)).
+`synced` and `sync.completed` arrive for every organization each night, and on
+request.
 
 With `syncRequestExchange` set, the bridge requests a sync when it starts and
 knows no space yet, which is the case at its first deployment. It publishes
@@ -60,11 +63,10 @@ their Matrix space without waiting for the night.
 ## The Matrix space
 
 * It is unencrypted, so the bridge and TwakeSpace can read it.
-* Its alias is `#twake-space-<space id>`, lowercased since the directory
-  ignores the case of space ids. The bridge finds the room again from
+* Its alias is `#twake-space-<space id>`, lowercased since space ids are
+  case-insensitive. The bridge finds the room again from
   the space id through it, so a redelivered `created` reuses the room and
-  announces it again. The bridge's registration must reserve these aliases,
-  or Synapse refuses to create the room with `M_EXCLUSIVE`:
+  announces it again. The bridge's registration must reserve these aliases:
 
   ```yaml
   namespaces:
@@ -73,9 +75,9 @@ their Matrix space without waiting for the night.
         regex: "#twake-space-.*:<domain>"
   ```
 
-* The bridge bot is the only one at level 100, so membership and settings only
-  change through the directory. The level of a member follows their role in
-  the space:
+* The bridge bot is the only one at level 100, so only the bridge changes
+  membership and settings, as it receives member events. The level of a member
+  follows their role in the space:
 
   | Role in the space | Level | In the Matrix space and General |
   | --- | --- | --- |
@@ -160,10 +162,10 @@ fails and is retried, 3 times a second apart by default, then ends in the
 dead-letter queue: the nightly sync adds the member.
 
 Once a space is deleted, the bridge ignores its events, since its id is never
-used again. Except a `created` or `synced` newer than the deletion: the
-directory lists the space again, so a `sync.completed` that missed it deleted
-it by mistake. The bridge cancels the deletion, opens General to the members
-again and adds them back.
+used again. Except a `created` or `synced` newer than the deletion: the space
+still exists, so a `sync.completed` that missed it deleted it by mistake. The
+bridge cancels the deletion, opens General to the members again and adds them
+back.
 
 ## Deletion
 
