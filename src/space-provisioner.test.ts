@@ -239,8 +239,8 @@ describe("createSpaceEventHandler", () => {
       expect(matrix.createSpace).toHaveBeenCalledWith(SPACE, "Design Sprint");
       expect(matrix.ensureGeneral).toHaveBeenCalledWith(SPACE, ROOM);
       expect(matrix.ensureUser).not.toHaveBeenCalledWith("@twakespace:acme.example", expect.anything());
-      expect(matrix.ensureUser).toHaveBeenCalledWith("@jdoe:acme.example", "John Doe");
-      expect(matrix.ensureUser).toHaveBeenCalledWith("@vlee:acme.example", "vlee");
+      expect(matrix.ensureUser).toHaveBeenCalledWith("@jdoe:acme.example", "John Doe", "John.Doe@acme.example");
+      expect(matrix.ensureUser).toHaveBeenCalledWith("@vlee:acme.example", "vlee", "vlee@acme.example");
       expect(matrix.join.mock.calls).toEqual([
         [
           ROOM,

@@ -34,6 +34,16 @@ function errcodeOf(error: unknown): string | undefined {
   ).errcode;
 }
 
+/** Refused by Synapse for the request itself (4xx), not a rate limit. */
+function isClientError(error: unknown): boolean {
+  const status = (
+    error as {
+      statusCode?: number;
+    }
+  ).statusCode;
+  return typeof status === "number" && status >= 400 && status < 500 && status !== 429;
+}
+
 function isNotFound(error: unknown): boolean {
   return (
     (
@@ -219,7 +229,11 @@ export class MatrixSpaces implements SpaceMatrix {
     }
   }
 
-  async ensureUser(matrixId: string, displayName: string): Promise<void> {
+  /**
+   * Creates the account of a member Synapse does not know yet. Its e-mail goes with it: the SSO
+   * later maps the person to this account and adds none, and ToM needs one to start a call.
+   */
+  async ensureUser(matrixId: string, displayName: string, email?: string): Promise<void> {
     const path = `/_synapse/admin/v2/users/${encodeURIComponent(matrixId)}`;
     try {
       await this.#client.doRequest("GET", path);
@@ -228,9 +242,30 @@ export class MatrixSpaces implements SpaceMatrix {
         throw error;
       }
       // Without a password: the person signs in through SSO, which maps to this same account
-      await this.#client.doRequest("PUT", path, null, {
+      const account = {
         displayname: displayName,
-      });
+      };
+      if (!email) {
+        await this.#client.doRequest("PUT", path, null, account);
+        return;
+      }
+      try {
+        await this.#client.doRequest("PUT", path, null, {
+          ...account,
+          threepids: [
+            {
+              medium: "email",
+              address: email.toLowerCase(),
+            },
+          ],
+        });
+      } catch (error) {
+        // An e-mail another account holds: the account without it, rather than no member at all
+        if (!isClientError(error)) {
+          throw error;
+        }
+        await this.#client.doRequest("PUT", path, null, account);
+      }
     }
   }
 
