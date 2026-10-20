@@ -172,6 +172,18 @@ describe("MatrixSpaces", () => {
     });
   });
 
+  it("creates the account without the e-mail when another account holds it", async () => {
+    client.doRequest
+      .mockImplementationOnce(() => Promise.reject(matrixError(404, "M_NOT_FOUND")))
+      .mockImplementationOnce(() => Promise.reject(matrixError(400, "M_THREEPID_IN_USE")));
+
+    await spaces.ensureUser("@jdoe:acme.example", "John Doe", "jdoe@acme.example");
+
+    expect(client.doRequest).toHaveBeenLastCalledWith("PUT", "/_synapse/admin/v2/users/%40jdoe%3Aacme.example", null, {
+      displayname: "John Doe",
+    });
+  });
+
   it("leaves an existing account as it is", async () => {
     await spaces.ensureUser("@jdoe:acme.example", "John Doe");
 
