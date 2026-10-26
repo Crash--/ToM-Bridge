@@ -143,7 +143,7 @@ in
         fi
         sleep 1
       done
-      bun dev -- --config "${cfgPath}"
+      npm run dev -- --config "${cfgPath}"
     '';
     process-compose.depends_on.postgres.condition = "process_healthy";
     process-compose.depends_on.rabbitmq.condition = "process_healthy";
@@ -153,14 +153,14 @@ in
   scripts._twp_bridge_run = {
     description = "Run the ToM Bridge in watch mode using the generated dev config";
     exec = ''
-      bun dev -- --config "$TOM_CONFIG"
+      npm run dev -- --config "$TOM_CONFIG"
     '';
   };
 
   scripts._twp_rabbitmq_update_common_settings = {
     description = "Send a RabbitMQ settings message to the bridge (interactive)";
     exec = ''
-      bun run ./tools/send-message.ts
+      npx tsx ./tools/send-message.ts
     '';
   };
 

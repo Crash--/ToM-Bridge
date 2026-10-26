@@ -15,7 +15,7 @@ devenv.local.yaml
 opencode.jsonc
 .pre-commit-config.yaml
 
-# dependencies (bun install)
+# dependencies (npm ci)
 node_modules
 
 # output

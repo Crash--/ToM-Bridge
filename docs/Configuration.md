@@ -75,7 +75,7 @@ When a developer runs the bridge through Devenv (either `devenv up` or
 custom file:
 
 ```bash
-bun dev -- --config /path/to/config.yaml
+npm run dev -- --config /path/to/config.yaml
 ```
 
 Devenv also exports the paths as environment variables for convenience:

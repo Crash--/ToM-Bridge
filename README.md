@@ -54,8 +54,8 @@ We highly recommend you to get a look at it.
 
 Making sure everything is set up so a developer can contribute is handled
 entirely by [Devenv](https://devenv.sh): once installed, it provisions the
-toolchain (bun, PostgreSQL, RabbitMQ, Synapse, Caddy, mkcert) and wires them
-together. There is no manual prerequisite to install.
+toolchain (Node.js 24, PostgreSQL, RabbitMQ, Synapse, Caddy, mkcert) and wires
+them together. There is no manual prerequisite to install.
 
 ```bash
 # Clone the repository:
@@ -68,7 +68,7 @@ cd tom-bridge
 devenv shell # or `devenv allow` for automatic shell setup on directory enter.
 
 # Install dependencies:
-bun install
+npm ci
 ```
 
 ### Development
@@ -85,7 +85,7 @@ sudo -v && devenv up
 ```
 
 `devenv up` starts all required services, including the ToM Bridge itself
-running as an auto-reloading (`bun dev`, watch mode) process.
+running as an auto-reloading (`npm run dev`, watch mode) process.
 
 Once running, the local services are available at:
 
@@ -93,7 +93,7 @@ Once running, the local services are available at:
 - **Synapse**: `https://matrix.twake.internal:8443`
 - **RabbitMQ**: `127.0.0.1:5672`
 - **Postgres**: `127.0.0.1:5432`
-- **ToM Bridge**: `bun dev` (watch mode) under `devenv up`
+- **ToM Bridge**: `npm run dev` (watch mode) under `devenv up`
 
 ## Documentation
 

@@ -6,10 +6,10 @@
 docker build -t tom-bridge .
 ```
 
-The build uses a two stage process. The first stage compiles the TypeScript
-source into a standalone binary using Bun. The second stage produces a minimal
-Debian runtime image containing only the compiled binary and the CA
-certificates needed for outbound HTTPS connections.
+The build uses a two stage process. The first stage installs the dependencies
+and compiles the TypeScript source with `tsc`. The second stage, on
+`node:24-trixie-slim`, holds only the compiled code and the production
+dependencies, and runs as the unprivileged `node` user.
 
 ## Running the Container
 
@@ -20,8 +20,8 @@ docker run --rm \
   tom-bridge
 ```
 
-The entrypoint runs `tom-bridge -c /data/config.yaml`. The container expects
-two YAML files mounted into `/data`:
+The entrypoint runs `node dist/index.js -c /data/config.yaml`. The container
+expects two YAML files mounted into `/data`:
 
 * **config.yaml** (required) tells the bridge how to reach Synapse, PostgreSQL,
   and RabbitMQ.
@@ -31,9 +31,12 @@ two YAML files mounted into `/data`:
   to the registration file through `registrationPath`, you may omit the separate
   `-f` mount.
 
+The image runs as the `node` user (uid 1000): the mounted `config.yaml` and
+`registration.yaml` must be readable by it.
+
 ### Passing Additional CLI Flags
 
-The binary accepts all flags from `matrix-appservice-bridge`. You can append
+The bridge accepts all flags from `matrix-appservice-bridge`. You can append
 them after the image name:
 
 ```bash
