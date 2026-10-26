@@ -66,9 +66,6 @@ describe("MatrixSpaces", () => {
         type: "m.space",
       },
       power_level_content_override: {
-        users: {
-          "@bot:acme.example": 100,
-        },
         events_default: 50,
         events: {
           "org.matrix.msc3401.call.member": 0,
@@ -80,6 +77,19 @@ describe("MatrixSpaces", () => {
       },
     });
     expect(JSON.stringify(options)).not.toContain("m.room.encryption");
+  });
+
+  // A room version 12 refuses its creator in the users, and gives it full power instead
+  it("leaves the levels of the bot, which creates the room, to the homeserver", async () => {
+    client.resolveRoom.mockRejectedValue(matrixError(404, "M_NOT_FOUND"));
+
+    await spaces.createSpace(SPACE, "Design Sprint");
+    await spaces.ensureGeneral(SPACE, ROOM);
+
+    expect(client.createRoom).toHaveBeenCalledTimes(2);
+    for (const [options] of client.createRoom.mock.calls) {
+      expect(options.power_level_content_override).not.toHaveProperty("users");
+    }
   });
 
   it("creates a public General room inside the space, out of the room directory", async () => {
