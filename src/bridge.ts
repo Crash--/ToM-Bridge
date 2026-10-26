@@ -705,7 +705,7 @@ export class CommonSettingsBridge {
 
         const spaces = this.#config.spaces;
         if (spaces) {
-          const matrix = new MatrixSpaces(this.#botIntent.matrixClient, botUserId, this.#config.domain);
+          const matrix = new MatrixSpaces(this.#botIntent.matrixClient, botUserId, this.#config.domain, this.#log);
           const registry = this.#createSpaceRegistry();
           await this.#client.subscribe(
             spaces.exchange,

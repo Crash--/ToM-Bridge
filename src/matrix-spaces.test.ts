@@ -1,4 +1,5 @@
 import type { MatrixClient } from "@vector-im/matrix-bot-sdk";
+import type { Logger } from "matrix-appservice-bridge";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 import { MatrixSpaces } from "./matrix-spaces.js";
@@ -23,6 +24,11 @@ describe("MatrixSpaces", () => {
     sendStateEvent: Mock;
     kickUser: Mock;
     getRoomMembers: Mock;
+    deleteRoomAlias: Mock;
+    leaveRoom: Mock;
+  };
+  let log: {
+    warn: Mock;
   };
   let spaces: MatrixSpaces;
 
@@ -35,8 +41,18 @@ describe("MatrixSpaces", () => {
       sendStateEvent: vi.fn(async () => "$event"),
       kickUser: vi.fn(async () => {}),
       getRoomMembers: vi.fn(async () => []),
+      deleteRoomAlias: vi.fn(async () => ({})),
+      leaveRoom: vi.fn(async () => ({})),
     };
-    spaces = new MatrixSpaces(client as unknown as MatrixClient, "@bot:acme.example", "acme.example");
+    log = {
+      warn: vi.fn(),
+    };
+    spaces = new MatrixSpaces(
+      client as unknown as MatrixClient,
+      "@bot:acme.example",
+      "acme.example",
+      log as unknown as Logger,
+    );
   });
 
   it("finds a space by its alias", async () => {
@@ -153,6 +169,47 @@ describe("MatrixSpaces", () => {
     client.createRoom.mockRejectedValue(matrixError(400, "M_ROOM_IN_USE"));
 
     expect(await spaces.createSpace(SPACE, "Design Sprint")).toBe(ROOM);
+  });
+
+  describe("a creation that failed halfway, leaving the alias on a room without power levels", () => {
+    const BROKEN = "!broken:acme.example";
+
+    beforeEach(() => {
+      client.resolveRoom.mockResolvedValue(BROKEN);
+      client.getRoomStateEvent.mockImplementation((roomId: string, type: string) =>
+        roomId === BROKEN && type === "m.room.power_levels"
+          ? Promise.reject(matrixError(404, "M_NOT_FOUND"))
+          : Promise.resolve({}),
+      );
+    });
+
+    it("finds no space", async () => {
+      expect(await spaces.findSpace(SPACE)).toBeNull();
+    });
+
+    it("creates the space again, with the alias taken from the broken room", async () => {
+      client.createRoom.mockRejectedValueOnce(matrixError(400, "M_ROOM_IN_USE"));
+
+      expect(await spaces.createSpace(SPACE, "Design Sprint")).toBe(ROOM);
+      expect(client.deleteRoomAlias).toHaveBeenCalledWith(`#twake-space-${SPACE}:acme.example`);
+      expect(client.leaveRoom).toHaveBeenCalledWith(BROKEN);
+      expect(client.createRoom).toHaveBeenCalledTimes(2);
+    });
+
+    it("creates the space again when the bot cannot leave the broken room", async () => {
+      client.createRoom.mockRejectedValueOnce(matrixError(400, "M_ROOM_IN_USE"));
+      client.leaveRoom.mockRejectedValue(matrixError(500, "M_UNKNOWN"));
+
+      expect(await spaces.createSpace(SPACE, "Design Sprint")).toBe(ROOM);
+      expect(log.warn).toHaveBeenCalled();
+    });
+  });
+
+  it("finds no space in a room the bot is not in, and says so", async () => {
+    client.getRoomStateEvent.mockRejectedValue(matrixError(403, "M_FORBIDDEN"));
+
+    expect(await spaces.findSpace(SPACE)).toBeNull();
+    expect(log.warn).toHaveBeenCalled();
   });
 
   it("creates an account Synapse does not know", async () => {
