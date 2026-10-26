@@ -1,4 +1,5 @@
 import type { MatrixClient } from "@vector-im/matrix-bot-sdk";
+import type { Logger } from "matrix-appservice-bridge";
 
 import { MODERATOR_LEVEL, POSTER_LEVEL, type SpaceMatrix } from "./space-provisioner.js";
 
@@ -34,14 +35,16 @@ function errcodeOf(error: unknown): string | undefined {
   ).errcode;
 }
 
-function isNotFound(error: unknown): boolean {
+function statusOf(error: unknown): number | undefined {
   return (
-    (
-      error as {
-        statusCode?: number;
-      }
-    ).statusCode === 404
-  );
+    error as {
+      statusCode?: number;
+    }
+  ).statusCode;
+}
+
+function isNotFound(error: unknown): boolean {
+  return statusOf(error) === 404;
 }
 
 /**
@@ -56,11 +59,13 @@ export class MatrixSpaces implements SpaceMatrix {
   readonly #client: MatrixClient;
   readonly #botUserId: string;
   readonly #domain: string;
+  readonly #log: Logger;
 
-  constructor(client: MatrixClient, botUserId: string, domain: string) {
+  constructor(client: MatrixClient, botUserId: string, domain: string, log: Logger) {
     this.#client = client;
     this.#botUserId = botUserId;
     this.#domain = domain;
+    this.#log = log;
   }
 
   // The directory matches space ids whatever their case, aliases do not
@@ -68,7 +73,7 @@ export class MatrixSpaces implements SpaceMatrix {
     return `twake-space-${spaceId.toLowerCase()}`;
   }
 
-  async #resolve(aliasName: string): Promise<string | null> {
+  async #lookup(aliasName: string): Promise<string | null> {
     try {
       return await this.#client.resolveRoom(`#${aliasName}:${this.#domain}`);
     } catch (error) {
@@ -77,6 +82,32 @@ export class MatrixSpaces implements SpaceMatrix {
       }
       throw error;
     }
+  }
+
+  /**
+   * A creation that failed halfway leaves the alias on a room without power
+   * levels, and the bot cannot manage a room it is not in: a new creation
+   * replaces either.
+   */
+  async #isManaged(roomId: string): Promise<boolean> {
+    try {
+      await this.#client.getRoomStateEvent(roomId, "m.room.power_levels", "");
+      return true;
+    } catch (error) {
+      if (isNotFound(error)) {
+        return false;
+      }
+      if (statusOf(error) === 403) {
+        this.#log.warn(`The bridge bot is not in ${roomId}, taken as not found`);
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  async #resolve(aliasName: string): Promise<string | null> {
+    const roomId = await this.#lookup(aliasName);
+    return roomId && (await this.#isManaged(roomId)) ? roomId : null;
   }
 
   findSpace(spaceId: string): Promise<string | null> {
@@ -178,8 +209,8 @@ export class MatrixSpaces implements SpaceMatrix {
       }[];
     },
   ): Promise<string> {
-    try {
-      return await this.#client.createRoom({
+    const create = (): Promise<string> =>
+      this.#client.createRoom({
         ...options,
         room_alias_name: aliasName,
         visibility: "private",
@@ -209,12 +240,28 @@ export class MatrixSpaces implements SpaceMatrix {
           redact: MODERATOR_LEVEL,
         },
       });
+    try {
+      return await create();
     } catch (error) {
       if (errcodeOf(error) !== "M_ROOM_IN_USE") {
         throw error;
       }
-      return this.#client.resolveRoom(`#${aliasName}:${this.#domain}`);
     }
+    const roomId = await this.#lookup(aliasName);
+    if (roomId && (await this.#isManaged(roomId))) {
+      return roomId;
+    }
+    // The events of a space run one at a time, so no creation is under way: the alias is left by a failed one
+    await this.#client.deleteRoomAlias(`#${aliasName}:${this.#domain}`).catch((error: unknown) => {
+      if (!isNotFound(error)) throw error;
+    });
+    // Without its alias the room is never found again, so a failed leave must not stop the new creation
+    if (roomId) {
+      await this.#client.leaveRoom(roomId).catch((error: unknown) => {
+        this.#log.warn(`Could not leave ${roomId}: ${(error as Error).message}`);
+      });
+    }
+    return create();
   }
 
   async ensureUser(matrixId: string, displayName: string): Promise<void> {
