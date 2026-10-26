@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, jest, type Mock, mock } from "bun:test";
+import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 import { type MatrixApis, MatrixProfileUpdater } from "./matrix-profile-updater";
 import { type ISettingsPayload, SynapseAdminRetryMode } from "./types";
@@ -14,34 +14,34 @@ describe("MatrixProfileUpdater", () => {
   beforeEach(() => {
     // Create mock matrix client
     mockMatrixClient = {
-      uploadContentFromUrl: mock(),
-      uploadContent: mock(),
+      uploadContentFromUrl: vi.fn(),
+      uploadContent: vi.fn(),
     };
 
     // Create mock intent
     mockIntent = {
-      setDisplayName: mock(),
-      setAvatarUrl: mock(),
+      setDisplayName: vi.fn(),
+      setAvatarUrl: vi.fn(),
       matrixClient: mockMatrixClient,
     } as any;
 
     // Create mock APIs
     mockApis = {
-      getIntent: mock().mockReturnValue(mockIntent),
-      adminUpsertUser: mock(),
-      botUploadContent: mock().mockResolvedValue("mxc://example.com/bot-uploaded"),
+      getIntent: vi.fn().mockReturnValue(mockIntent),
+      adminUpsertUser: vi.fn(),
+      botUploadContent: vi.fn().mockResolvedValue("mxc://example.com/bot-uploaded"),
     };
 
     // Create mock logger
     mockLogger = {
-      debug: mock(),
-      info: mock(),
-      warn: mock(),
-      error: mock(),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
     } as any;
 
     // Mock global fetch
-    global.fetch = mock<AnyFn>() as unknown as typeof fetch;
+    global.fetch = vi.fn<AnyFn>() as unknown as typeof fetch;
   });
 
   describe("updateDisplayName", () => {
@@ -227,13 +227,13 @@ describe("MatrixProfileUpdater", () => {
         const mockResponse = {
           ok: true,
           headers: {
-            get: mock((header: string) => {
+            get: vi.fn((header: string) => {
               if (header === "content-type") return "image/png";
               if (header === "content-length") return "1024";
               return null;
             }),
           },
-          arrayBuffer: mock().mockResolvedValue(mockBuffer.buffer),
+          arrayBuffer: vi.fn().mockResolvedValue(mockBuffer.buffer),
         };
         (global.fetch as unknown as Mock<AnyFn>).mockResolvedValue(mockResponse);
 
@@ -265,13 +265,13 @@ describe("MatrixProfileUpdater", () => {
         const mockResponse = {
           ok: true,
           headers: {
-            get: mock((header: string) => {
+            get: vi.fn((header: string) => {
               if (header === "content-type") return "image/png";
               if (header === "content-length") return "1024";
               return null;
             }),
           },
-          arrayBuffer: mock().mockResolvedValue(mockBuffer.buffer),
+          arrayBuffer: vi.fn().mockResolvedValue(mockBuffer.buffer),
         };
         (global.fetch as unknown as Mock<AnyFn>).mockResolvedValue(mockResponse);
 
@@ -291,13 +291,13 @@ describe("MatrixProfileUpdater", () => {
         const mockResponse = {
           ok: true,
           headers: {
-            get: mock((header: string) => {
+            get: vi.fn((header: string) => {
               if (header === "content-type") return "image/png";
               if (header === "content-length") return String(tooLargeSize);
               return null;
             }),
           },
-          arrayBuffer: mock(),
+          arrayBuffer: vi.fn(),
         };
         (global.fetch as unknown as Mock<AnyFn>).mockResolvedValue(mockResponse);
 
@@ -314,13 +314,13 @@ describe("MatrixProfileUpdater", () => {
         const mockResponse = {
           ok: true,
           headers: {
-            get: mock((header: string) => {
+            get: vi.fn((header: string) => {
               if (header === "content-type") return "image/png";
               // No content-length header
               return null;
             }),
           },
-          arrayBuffer: mock().mockResolvedValue(tooLargeBuffer.buffer),
+          arrayBuffer: vi.fn().mockResolvedValue(tooLargeBuffer.buffer),
         };
         (global.fetch as unknown as Mock<AnyFn>).mockResolvedValue(mockResponse);
 
@@ -331,7 +331,7 @@ describe("MatrixProfileUpdater", () => {
       });
 
       it("should timeout on slow avatar downloads", async () => {
-        jest.useFakeTimers();
+        vi.useFakeTimers();
         const httpUrl = "https://example.com/slow-avatar.png";
 
         // Mock fetch to simulate abort
@@ -351,13 +351,13 @@ describe("MatrixProfileUpdater", () => {
         const updatePromise = updater.updateAvatar("@user:example.com", httpUrl);
 
         // Fast-forward time to trigger timeout
-        jest.advanceTimersByTime(10000);
+        vi.advanceTimersByTime(10000);
 
         await expect(updatePromise).rejects.toThrow("Avatar fetch timed out after 10000ms");
 
         expect(mockIntent.setAvatarUrl).not.toHaveBeenCalled();
 
-        jest.useRealTimers();
+        vi.useRealTimers();
       });
 
       it("should handle HTTP errors from external URLs", async () => {
@@ -435,13 +435,13 @@ describe("MatrixProfileUpdater", () => {
         const mockResponse = {
           ok: true,
           headers: {
-            get: mock((header: string) => {
+            get: vi.fn((header: string) => {
               if (header === "content-type") return "image/png";
               if (header === "content-length") return "1024";
               return null;
             }),
           },
-          arrayBuffer: mock().mockResolvedValue(mockBuffer.buffer),
+          arrayBuffer: vi.fn().mockResolvedValue(mockBuffer.buffer),
         };
         (global.fetch as unknown as Mock<AnyFn>).mockResolvedValue(mockResponse);
         mockApis.botUploadContent.mockResolvedValue("mxc://example.com/bot-uploaded");
@@ -508,13 +508,13 @@ describe("MatrixProfileUpdater", () => {
         const mockResponse = {
           ok: true,
           headers: {
-            get: mock((header: string) => {
+            get: vi.fn((header: string) => {
               if (header === "content-type") return "image/png";
               if (header === "content-length") return "1024";
               return null;
             }),
           },
-          arrayBuffer: mock().mockResolvedValue(mockBuffer.buffer),
+          arrayBuffer: vi.fn().mockResolvedValue(mockBuffer.buffer),
         };
         (global.fetch as unknown as Mock<AnyFn>).mockResolvedValue(mockResponse);
 

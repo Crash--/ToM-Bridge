@@ -1,6 +1,5 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
-
 import type { Logger } from "matrix-appservice-bridge";
+import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 import { DeadLetterError, type RabbitMQMessageProperties } from "@linagora/rabbitmq-client";
 
@@ -20,10 +19,10 @@ import {
 import type { SpacesConfig } from "./types";
 
 const log = {
-  info: mock(),
-  warn: mock(),
-  error: mock(),
-  debug: mock(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
 } as unknown as Logger;
 
 const config: SpacesConfig = {
@@ -153,27 +152,27 @@ describe("eventName", () => {
       "twake.space.member.added",
       "member.added",
     ],
-  ])("reads %p as %p", (routingKey, name) => {
+  ])("reads %j as %j", (routingKey, name) => {
     expect(eventName(routingKey, "acme")).toBe(name);
   });
 });
 
 describe("createSpaceEventHandler", () => {
   let matrix: {
-    findSpace: ReturnType<typeof mock>;
-    createSpace: ReturnType<typeof mock>;
-    findGeneral: ReturnType<typeof mock>;
-    ensureGeneral: ReturnType<typeof mock>;
-    ensureUser: ReturnType<typeof mock>;
-    join: ReturnType<typeof mock>;
-    kick: ReturnType<typeof mock>;
-    setPowerLevels: ReturnType<typeof mock>;
-    rename: ReturnType<typeof mock>;
-    members: ReturnType<typeof mock>;
-    deleteSpace: ReturnType<typeof mock>;
-    closeRoom: ReturnType<typeof mock>;
+    findSpace: Mock;
+    createSpace: Mock;
+    findGeneral: Mock;
+    ensureGeneral: Mock;
+    ensureUser: Mock;
+    join: Mock;
+    kick: Mock;
+    setPowerLevels: Mock;
+    rename: Mock;
+    members: Mock;
+    deleteSpace: Mock;
+    closeRoom: Mock;
   };
-  let publish: ReturnType<typeof mock>;
+  let publish: Mock;
   let clock: SpaceClock;
   let registry: ReturnType<typeof memoryRegistry>;
 
@@ -195,20 +194,20 @@ describe("createSpaceEventHandler", () => {
 
   beforeEach(() => {
     matrix = {
-      findSpace: mock(async () => ROOM),
-      createSpace: mock(async () => ROOM),
-      findGeneral: mock(async () => null),
-      ensureGeneral: mock(async () => GENERAL),
-      ensureUser: mock(async () => {}),
-      join: mock(async () => {}),
-      kick: mock(async () => {}),
-      setPowerLevels: mock(async () => {}),
-      rename: mock(async () => {}),
-      members: mock(async () => []),
-      deleteSpace: mock(async () => {}),
-      closeRoom: mock(async () => {}),
+      findSpace: vi.fn(async () => ROOM),
+      createSpace: vi.fn(async () => ROOM),
+      findGeneral: vi.fn(async () => null),
+      ensureGeneral: vi.fn(async () => GENERAL),
+      ensureUser: vi.fn(async () => {}),
+      join: vi.fn(async () => {}),
+      kick: vi.fn(async () => {}),
+      setPowerLevels: vi.fn(async () => {}),
+      rename: vi.fn(async () => {}),
+      members: vi.fn(async () => []),
+      deleteSpace: vi.fn(async () => {}),
+      closeRoom: vi.fn(async () => {}),
     };
-    publish = mock(async () => {});
+    publish = vi.fn(async () => {});
     clock = memoryClock();
     registry = memoryRegistry();
   });
@@ -1183,7 +1182,7 @@ describe("createSpaceEventHandler", () => {
 describe("requestFirstSync", () => {
   it("requests a sync of the organization while the bridge knows none of its spaces", async () => {
     const registry = memoryRegistry();
-    const publish = mock(() => Promise.resolve());
+    const publish = vi.fn(() => Promise.resolve());
 
     await requestFirstSync({
       registry,
@@ -1199,7 +1198,7 @@ describe("requestFirstSync", () => {
   });
 
   it("requests a sync of every organization when none is configured", async () => {
-    const publish = mock(() => Promise.resolve());
+    const publish = vi.fn(() => Promise.resolve());
 
     await requestFirstSync({
       registry: memoryRegistry(),
@@ -1220,7 +1219,7 @@ describe("requestFirstSync", () => {
       roomId: ROOM,
       timestamp: 0,
     });
-    const publish = mock(() => Promise.resolve());
+    const publish = vi.fn(() => Promise.resolve());
 
     await requestFirstSync({
       registry,
@@ -1245,8 +1244,8 @@ describe("purgeDeletedSpaces", () => {
     await registry.scheduleDeletion(space("failing"), 1_000);
     await registry.scheduleDeletion(space("later"), 5_000);
     const matrix = {
-      findGeneral: mock(async (spaceId: string) => (spaceId === "due" ? "!due-general:acme.example" : null)),
-      deleteSpace: mock((roomId: string) =>
+      findGeneral: vi.fn(async (spaceId: string) => (spaceId === "due" ? "!due-general:acme.example" : null)),
+      deleteSpace: vi.fn((roomId: string) =>
         roomId === "!failing:acme.example" ? Promise.reject(new Error("boom")) : Promise.resolve(),
       ),
     };

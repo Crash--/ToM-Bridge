@@ -20,6 +20,7 @@
   "scripts": {
     "dev": "bun --watch run ./src/index.ts",
     "start": "bun run ./src/index.ts",
+    "test": "vitest run",
     "type-check": "tsc --noEmit"
   },
   "devDependencies": {
@@ -27,7 +28,8 @@
     "@types/pg": "^8.23.1",
     "@types/sqlite3": "^5.1.0",
     "bunup": "^0.16.32",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
   },
   "peerDependencies": {
     "typescript": ">=4.5.0"

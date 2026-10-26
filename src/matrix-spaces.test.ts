@@ -1,6 +1,5 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
-
 import type { MatrixClient } from "@vector-im/matrix-bot-sdk";
+import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 import { MatrixSpaces } from "./matrix-spaces";
 
@@ -17,25 +16,25 @@ function matrixError(statusCode: number, errcode: string) {
 
 describe("MatrixSpaces", () => {
   let client: {
-    resolveRoom: ReturnType<typeof mock>;
-    createRoom: ReturnType<typeof mock>;
-    doRequest: ReturnType<typeof mock>;
-    getRoomStateEvent: ReturnType<typeof mock>;
-    sendStateEvent: ReturnType<typeof mock>;
-    kickUser: ReturnType<typeof mock>;
-    getRoomMembers: ReturnType<typeof mock>;
+    resolveRoom: Mock;
+    createRoom: Mock;
+    doRequest: Mock;
+    getRoomStateEvent: Mock;
+    sendStateEvent: Mock;
+    kickUser: Mock;
+    getRoomMembers: Mock;
   };
   let spaces: MatrixSpaces;
 
   beforeEach(() => {
     client = {
-      resolveRoom: mock(async () => ROOM),
-      createRoom: mock(async () => ROOM),
-      doRequest: mock(async () => ({})),
-      getRoomStateEvent: mock(async () => ({})),
-      sendStateEvent: mock(async () => "$event"),
-      kickUser: mock(async () => {}),
-      getRoomMembers: mock(async () => []),
+      resolveRoom: vi.fn(async () => ROOM),
+      createRoom: vi.fn(async () => ROOM),
+      doRequest: vi.fn(async () => ({})),
+      getRoomStateEvent: vi.fn(async () => ({})),
+      sendStateEvent: vi.fn(async () => "$event"),
+      kickUser: vi.fn(async () => {}),
+      getRoomMembers: vi.fn(async () => []),
     };
     spaces = new MatrixSpaces(client as unknown as MatrixClient, "@bot:acme.example", "acme.example");
   });

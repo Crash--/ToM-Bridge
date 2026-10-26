@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, type Mock, mock } from "bun:test";
+import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 import { SettingsRepository } from "./settings-repository";
 import type { ISettingsPayload, UserSettingsTableName } from "./types";
@@ -25,17 +25,17 @@ describe("SettingsRepository", () => {
   let mockLogger: Logger;
 
   const createMockLogger = (): Logger => ({
-    debug: mock(),
-    info: mock(),
-    warn: mock(),
-    error: mock(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
   });
 
   const createMockDatabase = (): Database<UserSettingsTableName> => ({
-    get: mock(),
-    insert: mock(),
-    update: mock(),
-    close: mock(),
+    get: vi.fn(),
+    insert: vi.fn(),
+    update: vi.fn(),
+    close: vi.fn(),
   });
 
   const createTestPayload = (overrides: Partial<ISettingsPayload> = {}): ISettingsPayload => ({
@@ -52,7 +52,7 @@ describe("SettingsRepository", () => {
   });
 
   beforeEach(() => {
-    mock.clearAllMocks();
+    vi.clearAllMocks();
     mockDb = createMockDatabase();
     mockLogger = createMockLogger();
     repository = new SettingsRepository(mockDb as any, mockLogger as any);
