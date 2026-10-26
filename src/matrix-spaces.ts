@@ -193,11 +193,9 @@ export class MatrixSpaces implements SpaceMatrix {
           },
           ...initial_state,
         ],
-        // Only the bridge invites, kicks and changes settings, so the room never drifts from the directory beyond who joins a public one
+        // Only the bridge invites, kicks and changes settings, so the room never drifts from the directory beyond who joins a public one.
+        // The homeserver gives the bot, the creator, its level: 100 up to room version 11, beyond any level from 12, which refuses it in users.
         power_level_content_override: {
-          users: {
-            [this.#botUserId]: BRIDGE_LEVEL,
-          },
           users_default: 0,
           events_default: POSTER_LEVEL,
           events: {
