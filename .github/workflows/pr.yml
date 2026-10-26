@@ -26,8 +26,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
 
-      - run: bun install --frozen-lockfile
+      - run: npm ci
 
-      - run: bunx bunup
+      - run: npm run build
