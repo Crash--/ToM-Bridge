@@ -831,6 +831,20 @@ describe("createSpaceEventHandler", () => {
     expect(second).toBe(first);
   });
 
+  // Computed by Bun.randomUUIDv5 for the same space and room: the ids already announced must not change
+  it("announces the event id of the Bun runtime it replaced", async () => {
+    await handler()(
+      spaceEvent({
+        name: "Design Sprint",
+        members: [],
+      }),
+      properties("created"),
+    );
+
+    const [, announced] = publish.mock.calls[0]!;
+    expect(announced.id).toBe("3c10353a-e093-5242-b36f-2630f5bceab5");
+  });
+
   it("keeps the role of a sync when the created event of the space comes after it", async () => {
     const at = (timestamp: string, role: string) =>
       spaceEvent({
