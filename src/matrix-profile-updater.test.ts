@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
-import { type MatrixApis, MatrixProfileUpdater } from "./matrix-profile-updater";
-import { type ISettingsPayload, SynapseAdminRetryMode } from "./types";
+import { type MatrixApis, MatrixProfileUpdater } from "./matrix-profile-updater.js";
+import { type ISettingsPayload, SynapseAdminRetryMode } from "./types.js";
 
 type AnyFn = (...args: any[]) => any;
 

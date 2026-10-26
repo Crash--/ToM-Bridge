@@ -1,7 +1,7 @@
 import type { MatrixClient } from "@vector-im/matrix-bot-sdk";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
-import { MatrixSpaces } from "./matrix-spaces";
+import { MatrixSpaces } from "./matrix-spaces.js";
 
 const ROOM = "!space:acme.example";
 const GENERAL = "!general:acme.example";

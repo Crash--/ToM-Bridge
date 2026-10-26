@@ -3,16 +3,16 @@ import { Bridge, type Intent, Logger } from "matrix-appservice-bridge";
 
 import { RabbitMQClient } from "@linagora/rabbitmq-client";
 
-import { createUserDeletedHandler } from "./account-eraser";
-import { Database } from "./db";
+import { createUserDeletedHandler } from "./account-eraser.js";
+import { Database } from "./db/index.js";
 import {
   DEFAULT_AVATAR_FETCH_TIMEOUT_MS,
   DEFAULT_MAX_AVATAR_BYTES,
   type MatrixApis,
   MatrixProfileUpdater,
-} from "./matrix-profile-updater";
-import { MatrixSpaces } from "./matrix-spaces";
-import { SettingsRepository } from "./settings-repository";
+} from "./matrix-profile-updater.js";
+import { MatrixSpaces } from "./matrix-spaces.js";
+import { SettingsRepository } from "./settings-repository.js";
 import {
   createKeyedLock,
   createSpaceEventHandler,
@@ -22,7 +22,7 @@ import {
   type SpaceClock,
   type SpaceLock,
   type SpaceRegistry,
-} from "./space-provisioner";
+} from "./space-provisioner.js";
 import {
   type BridgeConfig,
   type CommonSettingsMessage,
@@ -33,7 +33,7 @@ import {
   SynapseAdminRetryMode,
   UserIdNotProvidedError,
   type UserSettingsTableName,
-} from "./types";
+} from "./types.js";
 
 // =============================================================================
 // Message handling helpers (inlined from message-handler.ts)

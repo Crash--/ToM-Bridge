@@ -1,7 +1,7 @@
 import type { Logger } from "matrix-appservice-bridge";
 import { describe, expect, it, vi } from "vitest";
 
-import { createUserDeletedHandler, toSynapseLocalpart } from "./account-eraser";
+import { createUserDeletedHandler, toSynapseLocalpart } from "./account-eraser.js";
 
 const log = {
   info: vi.fn(),

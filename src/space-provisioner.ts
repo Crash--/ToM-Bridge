@@ -3,8 +3,8 @@ import { v5 as uuidv5 } from "uuid";
 
 import { DeadLetterError, type RabbitMQMessageProperties } from "@linagora/rabbitmq-client";
 
-import { toSynapseLocalpart } from "./account-eraser";
-import type { SpacesConfig } from "./types";
+import { toSynapseLocalpart } from "./account-eraser.js";
+import type { SpacesConfig } from "./types.js";
 
 /** Power level of members allowed to post. Membership and settings stay at 100, the bridge's. */
 export const POSTER_LEVEL = 50;

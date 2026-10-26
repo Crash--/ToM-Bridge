@@ -1,18 +1,18 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "module": "Preserve",
+    "module": "NodeNext",
     "moduleDetection": "force",
 
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
+    "moduleResolution": "NodeNext",
     "verbatimModuleSyntax": true,
-    "noEmit": true,
+    "rootDir": "src",
+    "outDir": "dist",
 
     "strict": true,
     "skipLibCheck": true,
     "types": [
-      "bun"
+      "node"
     ],
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
@@ -31,7 +31,6 @@
   ],
   "exclude": [
     "node_modules",
-    "dist",
-    "bunup.config.ts"
+    "dist"
   ]
 }

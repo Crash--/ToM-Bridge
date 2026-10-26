@@ -1,6 +1,6 @@
 import type { Logger } from "matrix-appservice-bridge";
 
-import type { DeletionConfig } from "./types";
+import type { DeletionConfig } from "./types.js";
 
 /** Deactivates and erases one Matrix account. */
 export type EraseAccount = (matrixId: string) => Promise<void>;

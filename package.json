@@ -5,8 +5,7 @@
   "type": "module",
   "private": true,
   "files": [
-    "dist",
-    "bin"
+    "dist"
   ],
   "exports": {
     "./package.json": "./package.json"
@@ -17,17 +16,21 @@
   "bugs": {
     "url": "https://github.com/linagora/tom-bridge/issues"
   },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
-    "dev": "bun --watch run ./src/index.ts",
-    "start": "bun run ./src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch ./src/index.ts",
+    "start": "node ./dist/index.js",
     "test": "vitest run",
     "type-check": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.0",
+    "@types/node": "^24.0.0",
     "@types/pg": "^8.23.1",
     "@types/sqlite3": "^5.1.0",
-    "bunup": "^0.16.32",
+    "tsx": "^4.20.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   },
@@ -47,12 +50,9 @@
     "sqlite3": "^6.0.1",
     "uuid": "^14.0.3"
   },
-  "trustedDependencies": [
-    "@matrix-org/matrix-sdk-crypto-nodejs",
-    "sqlite3"
-  ],
-  "patchedDependencies": {
-    "@vector-im/matrix-bot-sdk@0.10.0-element.0": "patches/@vector-im%2Fmatrix-bot-sdk@0.10.0-element.0.patch",
-    "@matrix-org/matrix-sdk-crypto-nodejs@0.6.6": "patches/@matrix-org%2Fmatrix-sdk-crypto-nodejs@0.6.6.patch"
+  "allowScripts": {
+    "@matrix-org/matrix-sdk-crypto-nodejs": true,
+    "sqlite3": true,
+    "esbuild": true
   }
 }

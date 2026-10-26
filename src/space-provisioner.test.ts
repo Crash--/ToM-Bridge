@@ -15,8 +15,8 @@ import {
   type SpaceClock,
   type SpaceRegistry,
   SYNC_REQUESTED,
-} from "./space-provisioner";
-import type { SpacesConfig } from "./types";
+} from "./space-provisioner.js";
+import type { SpacesConfig } from "./types.js";
 
 const log = {
   info: vi.fn(),

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
-import { SettingsRepository } from "./settings-repository";
-import type { ISettingsPayload, UserSettingsTableName } from "./types";
+import { SettingsRepository } from "./settings-repository.js";
+import type { ISettingsPayload, UserSettingsTableName } from "./types.js";
 
 // Type-only imports to avoid runtime module resolution issues in tests
 type AnyFn = (...args: any[]) => any;

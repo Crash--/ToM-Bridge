@@ -7,10 +7,10 @@ import {
   Logger,
   Database as MockDatabase,
   RabbitMQClient as MockRabbitMQClient,
-} from "./__mocks__/shared";
-import { MatrixProfileUpdater } from "./matrix-profile-updater";
-import { SettingsRepository } from "./settings-repository";
-import type { BridgeConfig, ISettingsPayload, StoredUserSettings } from "./types";
+} from "./__mocks__/shared.js";
+import { MatrixProfileUpdater } from "./matrix-profile-updater.js";
+import { SettingsRepository } from "./settings-repository.js";
+import type { BridgeConfig, ISettingsPayload, StoredUserSettings } from "./types.js";
 
 type AnyFn = (...args: any[]) => any;
 
@@ -27,11 +27,11 @@ vi.mock("@linagora/rabbitmq-client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@linagora/rabbitmq-client")>()),
   RabbitMQClient: MockRabbitMQClient,
 }));
-vi.mock("./db", () => ({
+vi.mock("./db/index.js", () => ({
   Database: MockDatabase,
 }));
 
-const { CommonSettingsBridge } = await import("./bridge");
+const { CommonSettingsBridge } = await import("./bridge.js");
 
 describe("CommonSettingsBridge", () => {
   let bridge: InstanceType<typeof CommonSettingsBridge>;

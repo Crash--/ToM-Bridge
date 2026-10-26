@@ -10,31 +10,35 @@
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Stage 1 - builder: compile into a standalone binary with bunup
+# Stage 1 - builder: compile the TypeScript, keep the production dependencies
+# Trixie, as the prebuilt sqlite3 binary needs glibc 2.38.
 # -----------------------------------------------------------------------------
-FROM docker.io/oven/bun:debian AS builder
+FROM docker.io/node:24-trixie-slim AS builder
 
 WORKDIR /app
 
-COPY package.json bun.lock bunup.config.ts tsconfig.json ./
-COPY patches/ ./patches/
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY tsconfig.json tsconfig.build.json ./
 COPY src/ ./src/
-
-RUN bun install --frozen-lockfile
-
-RUN bunx bunup
+RUN npm run build && npm prune --omit=dev
 
 # -----------------------------------------------------------------------------
-# Stage 2 - runtime image: fresh with assets files and binary only
+# Stage 2 - runtime image: the compiled code and its dependencies only
 # -----------------------------------------------------------------------------
-FROM docker.io/debian:stable-slim AS runtime
+FROM docker.io/node:24-trixie-slim AS runtime
 
 WORKDIR /app
-RUN mkdir -p /data
+RUN mkdir -p /data && chown node:node /data
 
-COPY package.json ./
-COPY --from=builder /app/bin/tom-bridge ./
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
 
+ENV NODE_ENV=production
 ENV REGISTRATION_FILE=/data/registration.yaml
 
-ENTRYPOINT ["./tom-bridge", "-c", "/data/config.yaml"]
+USER node
+
+ENTRYPOINT ["node", "dist/index.js", "-c", "/data/config.yaml"]

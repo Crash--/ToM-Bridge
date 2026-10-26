@@ -1,6 +1,6 @@
 import type { Intent, Logger } from "matrix-appservice-bridge";
 
-import { AvatarFetchError, type ISettingsPayload, SynapseAdminRetryMode } from "./types";
+import { AvatarFetchError, type ISettingsPayload, SynapseAdminRetryMode } from "./types.js";
 
 /** What a failed Matrix request carries, as far as this file reads it. */
 type MatrixError = {

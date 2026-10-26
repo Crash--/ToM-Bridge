@@ -8,8 +8,8 @@ import {
   Database as MockDatabase,
   Logger as MockLogger,
   RabbitMQClient as MockRabbitMQClient,
-} from "./__mocks__/shared";
-import type { BridgeConfig } from "./types";
+} from "./__mocks__/shared.js";
+import type { BridgeConfig } from "./types.js";
 
 // Register the shared leaf-dependency mocks for this test file
 vi.mock("matrix-appservice-bridge", () => ({
@@ -22,7 +22,7 @@ vi.mock("@linagora/rabbitmq-client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@linagora/rabbitmq-client")>()),
   RabbitMQClient: MockRabbitMQClient,
 }));
-vi.mock("./db", () => ({
+vi.mock("./db/index.js", () => ({
   Database: MockDatabase,
 }));
 
@@ -183,7 +183,7 @@ const createTestMessage = (overrides: Record<string, any> = {}) => ({
 
 describe("CommonSettingsBridge - Message Parsing", () => {
   it("should process a valid message", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -200,7 +200,7 @@ describe("CommonSettingsBridge - Message Parsing", () => {
   });
 
   it("should ack-and-drop messages where matrix_id is missing (no retry storm)", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -219,7 +219,7 @@ describe("CommonSettingsBridge - Message Parsing", () => {
 
 describe("CommonSettingsBridge - Avatar URL Resolution", () => {
   it("should use MXC URL directly when avatar starts with mxc://", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -239,7 +239,7 @@ describe("CommonSettingsBridge - Avatar URL Resolution", () => {
   });
 
   it("should download and upload HTTP avatar URL", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -265,7 +265,7 @@ describe("CommonSettingsBridge - Avatar URL Resolution", () => {
   });
 
   it("should propagate upload errors", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -284,7 +284,7 @@ describe("CommonSettingsBridge - Avatar URL Resolution", () => {
   });
 
   it("should use uploaded MXC URL with admin API in EXCLUSIVE mode", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig("exclusive");
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -315,7 +315,7 @@ describe("CommonSettingsBridge - Avatar URL Resolution", () => {
 
 describe("CommonSettingsBridge - Matrix Updates", () => {
   it("should use admin API in EXCLUSIVE mode for display name", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig("exclusive");
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -331,7 +331,7 @@ describe("CommonSettingsBridge - Matrix Updates", () => {
   });
 
   it("should use intent API in DISABLED mode for display name", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig("disabled");
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -344,7 +344,7 @@ describe("CommonSettingsBridge - Matrix Updates", () => {
   });
 
   it("should fallback to admin API on M_FORBIDDEN in FALLBACK mode", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig("fallback");
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -367,7 +367,7 @@ describe("CommonSettingsBridge - Matrix Updates", () => {
 
 describe("CommonSettingsBridge - Change Detection", () => {
   it("should not update display name when unchanged", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -397,7 +397,7 @@ describe("CommonSettingsBridge - Change Detection", () => {
   });
 
   it("should update display name when changed", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -435,7 +435,7 @@ describe("CommonSettingsBridge - Change Detection", () => {
 
 describe("CommonSettingsBridge - Lifecycle", () => {
   it("should start successfully", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -448,7 +448,7 @@ describe("CommonSettingsBridge - Lifecycle", () => {
   });
 
   it("should stop successfully", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -460,7 +460,7 @@ describe("CommonSettingsBridge - Lifecycle", () => {
   });
 
   it("should check admin privileges on start", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
