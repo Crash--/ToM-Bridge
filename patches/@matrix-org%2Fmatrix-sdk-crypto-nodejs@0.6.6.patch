@@ -1,13 +1,13 @@
 diff --git a/index.js b/index.js
-index 0000000..0000000 100644
+index a5d15cd6aa9f297ec8acbd905c091ddd4f1fd282..2b4f63ce670d78af08467f797b7837edb9f4250f 100644
 --- a/index.js
 +++ b/index.js
 @@ -187,7 +187,7 @@ switch (platform) {
-         if (localFileExisted) {
-           nativeBinding = require('./matrix-sdk-crypto.linux-x64-gnu.node')
-         } else {
--          nativeBinding = require('@matrix-org/matrix-sdk-crypto-nodejs-linux-x64-gnu')
-+          nativeBinding = require('./matrix-sdk-crypto.linux-x64-gnu.node')
-         }
-       } catch (e) {
-         loadError = e
+             if (localFileExisted) {
+               nativeBinding = require('./matrix-sdk-crypto.linux-x64-gnu.node')
+             } else {
+-              nativeBinding = require('@matrix-org/matrix-sdk-crypto-nodejs-linux-x64-gnu')
++              nativeBinding = require('./matrix-sdk-crypto.linux-x64-gnu.node')
+             }
+           } catch (e) {
+             loadError = e
