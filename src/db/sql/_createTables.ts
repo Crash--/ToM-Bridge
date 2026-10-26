@@ -12,49 +12,52 @@ function createTables<T extends string>(
   resolve: () => void,
   reject: (e: Error) => void,
 ): void {
-  const promises: Array<Promise<void>> = [];
-  (Object.keys(tables) as T[]).forEach((table: T) => {
-    promises.push(
-      new Promise<void>((_resolve, _reject) => {
-        db.exists(table)
-          .then((count) => {
-            if (!count) {
-              db.rawQuery(`CREATE TABLE ${table}(${tables[table]})`)
-                .then(() =>
-                  Promise.all(
-                    (indexes[table] ? (indexes[table] as string[]) : []).map<Promise<unknown>>((index) =>
-                      db.rawQuery(`CREATE INDEX i_${table}_${index} ON ${table} (${index})`).catch((e) => {
-                        /* istanbul ignore next */
-                        logger.error(e, `Index ${index}`);
-                      }),
+  // Replicas starting together on an empty database would each create the same tables
+  db.withLock("createTables", () => {
+    const promises: Array<Promise<void>> = [];
+    (Object.keys(tables) as T[]).forEach((table: T) => {
+      promises.push(
+        new Promise<void>((_resolve, _reject) => {
+          db.exists(table)
+            .then((count) => {
+              if (!count) {
+                db.rawQuery(`CREATE TABLE ${table}(${tables[table]})`)
+                  .then(() =>
+                    Promise.all(
+                      (indexes[table] ? (indexes[table] as string[]) : []).map<Promise<unknown>>((index) =>
+                        db.rawQuery(`CREATE INDEX i_${table}_${index} ON ${table} (${index})`).catch((e) => {
+                          /* istanbul ignore next */
+                          logger.error(e, `Index ${index}`);
+                        }),
+                      ),
                     ),
-                  ),
-                )
-                .then(() =>
-                  Promise.all(
-                    (initializeValues[table]
-                      ? (initializeValues[table] as Array<Record<string, string | number>>)
-                      : []
-                    ).map<Promise<unknown>>((entry) => db.insert(table, entry)),
-                  ),
-                )
-                .then(() => {
-                  _resolve();
-                })
-                // istanbul ignore next
-                .catch((e) => {
-                  _reject(e);
-                });
-            } else {
-              _resolve();
-            }
-          })
-          /* istanbul ignore next */
-          .catch(_reject);
-      }),
-    );
-  });
-  Promise.all(promises)
+                  )
+                  .then(() =>
+                    Promise.all(
+                      (initializeValues[table]
+                        ? (initializeValues[table] as Array<Record<string, string | number>>)
+                        : []
+                      ).map<Promise<unknown>>((entry) => db.insert(table, entry)),
+                    ),
+                  )
+                  .then(() => {
+                    _resolve();
+                  })
+                  // istanbul ignore next
+                  .catch((e) => {
+                    _reject(e);
+                  });
+              } else {
+                _resolve();
+              }
+            })
+            /* istanbul ignore next */
+            .catch(_reject);
+        }),
+      );
+    });
+    return Promise.all(promises);
+  })
     .then(() => {
       resolve();
     })
