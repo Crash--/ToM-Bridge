@@ -1,6 +1,6 @@
 import type { Intent, Logger } from "matrix-appservice-bridge";
 
-import { AvatarFetchError, type ISettingsPayload, SynapseAdminRetryMode } from "./types.js";
+import { AvatarFetchError, type AvatarUpload, type ISettingsPayload, SynapseAdminRetryMode } from "./types.js";
 
 /** What a failed Matrix request carries, as far as this file reads it. */
 type MatrixError = {
@@ -56,6 +56,17 @@ export interface MatrixApis {
    * @returns The MXC URL of the uploaded content
    */
   botUploadContent(content: Buffer, contentType: string, fileName?: string): Promise<string>;
+
+  /**
+   * Reads the profile Matrix shows for a user, not from a cache.
+   * @param userId - The Matrix user ID
+   */
+  getProfile(userId: string): Promise<MatrixProfile>;
+}
+
+export interface MatrixProfile {
+  displayname?: string;
+  avatar_url?: string;
 }
 
 /**
@@ -284,8 +295,9 @@ export class MatrixProfileUpdater {
    * If the avatar URL is not an MXC URL, it will be downloaded and uploaded first.
    * @param userId - The Matrix user ID to update
    * @param avatarUrl - The avatar URL to set (can be mxc:// or http(s)://)
+   * @returns The mxc URL set on the profile
    */
-  async updateAvatar(userId: string, avatarUrl: string): Promise<void> {
+  async updateAvatar(userId: string, avatarUrl: string): Promise<string> {
     const resolvedUrl = await this.#resolveAvatarUrl(userId, avatarUrl);
 
     this.logger.debug(`Updating avatar for ${userId} (retryMode=${this.retryMode})`);
@@ -293,7 +305,7 @@ export class MatrixProfileUpdater {
     if (this.retryMode === SynapseAdminRetryMode.EXCLUSIVE) {
       this.logger.debug(`Using admin API exclusively for avatar update: ${userId}`);
       await this.#updateAvatarAdmin(userId, resolvedUrl);
-      return;
+      return resolvedUrl;
     }
 
     const intent = this.apis.getIntent(userId);
@@ -319,6 +331,7 @@ export class MatrixProfileUpdater {
         throw err;
       }
     }
+    return resolvedUrl;
   }
 
   /**
@@ -344,44 +357,68 @@ export class MatrixProfileUpdater {
   }
 
   /**
-   * Processes setting changes between old and new payloads.
-   * Detects changes in display name and avatar, then updates them in Matrix.
+   * Writes the display name and avatar of a payload, without reading the
+   * profile: the degraded mode, without the database, has nothing to compare.
    * @param userId - The Matrix user ID
-   * @param oldPayload - Previous settings payload (null if new user)
-   * @param newPayload - New settings payload
-   * @param isNewUser - Whether this is a new user (forces updates)
+   * @param payload - The settings to show
    */
-  async processChanges(
+  async processChanges(userId: string, payload: ISettingsPayload): Promise<void> {
+    if (payload.display_name) {
+      await this.updateDisplayName(userId, payload.display_name);
+    }
+    if (payload.avatar) {
+      await this.updateAvatar(userId, payload.avatar);
+    }
+  }
+
+  /**
+   * Makes the Matrix profile show the given settings, writing only what it
+   * shows otherwise. An http(s) avatar is downloaded again only when the
+   * profile does not show the mxc URL it became on its last upload.
+   * @param userId - The Matrix user ID
+   * @param payload - The settings to show
+   * @param lastAvatar - The source URL and mxc URL of the last avatar uploaded
+   * @returns The avatar uploaded, to remember with the settings, or null
+   */
+  async reconcile(
     userId: string,
-    oldPayload: ISettingsPayload | null,
-    newPayload: ISettingsPayload,
-  ): Promise<void> {
-    this.logger.debug(`Processing changes for ${userId}`);
+    payload: ISettingsPayload,
+    lastAvatar: AvatarUpload | null,
+  ): Promise<AvatarUpload | null> {
+    const profile = await this.#readProfile(userId);
 
-    const displayNameChanged = oldPayload?.display_name !== newPayload.display_name;
-    const avatarChanged = oldPayload?.avatar !== newPayload.avatar;
-
-    this.logger.debug(
-      `Change detection: displayName=${displayNameChanged} (old="${oldPayload?.display_name}", new="${newPayload.display_name}"), avatar=${avatarChanged} (old="${oldPayload?.avatar}", new="${newPayload.avatar}")`,
-    );
-
-    if (!displayNameChanged && !avatarChanged) {
-      this.logger.debug(`No profile changes detected for ${userId}`);
-      return;
+    if (payload.display_name && payload.display_name !== profile.displayname) {
+      await this.updateDisplayName(userId, payload.display_name);
     }
 
-    if (displayNameChanged && newPayload.display_name) {
-      this.logger.debug(`Display name change detected for ${userId}`);
-      await this.updateDisplayName(userId, newPayload.display_name);
-    } else if (displayNameChanged && !newPayload.display_name) {
-      this.logger.warn(`Display name changed but new value is empty for ${userId}`);
+    const avatar = payload.avatar;
+    if (!avatar) {
+      return null;
     }
+    if (avatar.startsWith("mxc://")) {
+      if (avatar !== profile.avatar_url) {
+        await this.updateAvatar(userId, avatar);
+      }
+      return null;
+    }
+    if (lastAvatar?.source === avatar && lastAvatar.mxc === profile.avatar_url) {
+      return null;
+    }
+    return {
+      source: avatar,
+      mxc: await this.updateAvatar(userId, avatar),
+    };
+  }
 
-    if (avatarChanged && newPayload.avatar) {
-      this.logger.debug(`Avatar change detected for ${userId}`);
-      await this.updateAvatar(userId, newPayload.avatar);
-    } else if (avatarChanged && !newPayload.avatar) {
-      this.logger.warn(`Avatar changed but new value is empty for ${userId}`);
+  /** The profile Matrix shows, empty for a user it does not know yet. */
+  async #readProfile(userId: string): Promise<MatrixProfile> {
+    try {
+      return await this.apis.getProfile(userId);
+    } catch (caught) {
+      if ((caught as MatrixError | undefined)?.errcode === "M_NOT_FOUND") {
+        return {};
+      }
+      throw caught;
     }
   }
 }

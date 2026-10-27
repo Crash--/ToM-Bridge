@@ -7,7 +7,7 @@ import type { ISettingsPayload, UserSettingsTableName } from "./types.js";
 type AnyFn = (...args: any[]) => any;
 type Database<_T> = {
   get: Mock<AnyFn>;
-  insert: Mock<AnyFn>;
+  upsertIfNewer: Mock<AnyFn>;
   update: Mock<AnyFn>;
   close: Mock<AnyFn>;
 };
@@ -33,7 +33,7 @@ describe("SettingsRepository", () => {
 
   const createMockDatabase = (): Database<UserSettingsTableName> => ({
     get: vi.fn(),
-    insert: vi.fn(),
+    upsertIfNewer: vi.fn(),
     update: vi.fn(),
     close: vi.fn(),
   });
@@ -67,6 +67,8 @@ describe("SettingsRepository", () => {
         version: 1,
         timestamp: 1234567890,
         request_id: "req-123",
+        avatar_source: "https://workspace.example.com/avatar.png",
+        avatar_mxc: "mxc://example.com/avatar",
       };
 
       mockDb.get.mockResolvedValue([
@@ -83,6 +85,8 @@ describe("SettingsRepository", () => {
           "version",
           "timestamp",
           "request_id",
+          "avatar_source",
+          "avatar_mxc",
         ],
         {
           matrix_id: "@user:example.com",
@@ -95,6 +99,10 @@ describe("SettingsRepository", () => {
         version: 1,
         timestamp: 1234567890,
         request_id: "req-123",
+        avatar: {
+          source: "https://workspace.example.com/avatar.png",
+          mxc: "mxc://example.com/avatar",
+        },
       });
 
       expect(mockLogger.debug).toHaveBeenCalledWith("Looking up user settings for @user:example.com");
@@ -148,38 +156,22 @@ describe("SettingsRepository", () => {
     });
   });
 
-  describe("saveSettings", () => {
+  describe("saveIfNewer", () => {
     const userId = "@user:example.com";
     const payload = createTestPayload();
     const version = 1;
     const timestamp = 1234567890;
     const requestId = "req-123";
 
-    it("should insert new settings when isNewUser is true", async () => {
-      mockDb.insert.mockResolvedValue(undefined);
+    it("saves in one write that keeps newer stored settings, and says it saved", async () => {
+      mockDb.upsertIfNewer.mockResolvedValue([
+        {
+          matrix_id: userId,
+        },
+      ]);
 
-      await repository.saveSettings(userId, payload, version, timestamp, requestId, true);
-
-      expect(mockDb.insert).toHaveBeenCalledWith("usersettings", {
-        matrix_id: userId,
-        settings: JSON.stringify(payload),
-        version,
-        timestamp,
-        request_id: requestId,
-      });
-
-      expect(mockDb.update).not.toHaveBeenCalled();
-      expect(mockLogger.debug).toHaveBeenCalledWith(`Inserting new cache entry for ${userId}`);
-      expect(mockLogger.debug).toHaveBeenCalledWith(`Successfully inserted cache entry for ${userId}`);
-      expect(mockLogger.debug).toHaveBeenCalledWith(expect.stringContaining(`Cache updated for ${userId}`));
-    });
-
-    it("should update existing settings when isNewUser is false", async () => {
-      mockDb.update.mockResolvedValue(undefined);
-
-      await repository.saveSettings(userId, payload, version, timestamp, requestId, false);
-
-      expect(mockDb.update).toHaveBeenCalledWith(
+      expect(await repository.saveIfNewer(userId, payload, version, timestamp, requestId)).toBe(true);
+      expect(mockDb.upsertIfNewer).toHaveBeenCalledWith(
         "usersettings",
         {
           matrix_id: userId,
@@ -189,98 +181,46 @@ describe("SettingsRepository", () => {
           request_id: requestId,
         },
         "matrix_id",
-        userId,
+        [
+          "version",
+          "timestamp",
+        ],
       );
-
-      expect(mockDb.insert).not.toHaveBeenCalled();
-      expect(mockLogger.debug).toHaveBeenCalledWith(`Updating cache entry for ${userId}`);
-      expect(mockLogger.debug).toHaveBeenCalledWith(`Successfully updated cache entry for ${userId}`);
     });
 
-    it("should throw error when insert fails with non-duplicate error", async () => {
-      const insertError = new Error("Database connection lost");
-      mockDb.insert.mockRejectedValue(insertError);
+    it("says it saved nothing when the stored settings are as recent or more", async () => {
+      mockDb.upsertIfNewer.mockResolvedValue([]);
 
-      await expect(repository.saveSettings(userId, payload, version, timestamp, requestId, true)).rejects.toThrow(
+      expect(await repository.saveIfNewer(userId, payload, version, timestamp, requestId)).toBe(false);
+    });
+
+    it("throws when the write fails", async () => {
+      mockDb.upsertIfNewer.mockRejectedValue(new Error("Database connection lost"));
+
+      await expect(repository.saveIfNewer(userId, payload, version, timestamp, requestId)).rejects.toThrow(
         "Database connection lost",
       );
-
       expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining(`Failed to insert cache entry for ${userId}: Database connection lost`),
+        expect.stringContaining(`Failed to save settings for ${userId}: Database connection lost`),
       );
     });
+  });
 
-    it("should fallback to update when insert fails with duplicate key error", async () => {
-      const duplicateError = new Error("duplicate key value violates unique constraint");
-      mockDb.insert.mockRejectedValue(duplicateError);
-      mockDb.update.mockResolvedValue(undefined);
+  describe("saveAvatar", () => {
+    it("remembers the mxc URL of an avatar URL, whatever the version stored", async () => {
+      mockDb.update.mockResolvedValue([]);
 
-      await repository.saveSettings(userId, payload, version, timestamp, requestId, true);
+      await repository.saveAvatar("@user:example.com", "https://workspace.example.com/a.png", "mxc://example.com/a");
 
-      expect(mockDb.insert).toHaveBeenCalledWith("usersettings", {
-        matrix_id: userId,
-        settings: JSON.stringify(payload),
-        version,
-        timestamp,
-        request_id: requestId,
-      });
       expect(mockDb.update).toHaveBeenCalledWith(
         "usersettings",
         {
-          matrix_id: userId,
-          settings: JSON.stringify(payload),
-          version,
-          timestamp,
-          request_id: requestId,
+          avatar_source: "https://workspace.example.com/a.png",
+          avatar_mxc: "mxc://example.com/a",
         },
         "matrix_id",
-        userId,
+        "@user:example.com",
       );
-      expect(mockLogger.debug).toHaveBeenCalledWith(expect.stringContaining("Duplicate key on insert"));
-      expect(mockLogger.debug).toHaveBeenCalledWith(expect.stringContaining("after insert race"));
-    });
-
-    it("should fallback to update when insert fails with PostgreSQL unique violation code", async () => {
-      const duplicateError: any = new Error("unique constraint violation");
-      duplicateError.code = "23505";
-      mockDb.insert.mockRejectedValue(duplicateError);
-      mockDb.update.mockResolvedValue(undefined);
-
-      await repository.saveSettings(userId, payload, version, timestamp, requestId, true);
-
-      expect(mockDb.update).toHaveBeenCalled();
-      expect(mockLogger.debug).toHaveBeenCalledWith(expect.stringContaining("concurrent insert detected"));
-    });
-
-    it("should throw error when update fails", async () => {
-      const updateError = new Error("Update failed");
-      mockDb.update.mockRejectedValue(updateError);
-
-      await expect(repository.saveSettings(userId, payload, version, timestamp, requestId, false)).rejects.toThrow(
-        "Update failed",
-      );
-
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining(`Failed to update cache entry for ${userId}: Update failed`),
-      );
-    });
-
-    it("should serialize payload as JSON string", async () => {
-      mockDb.insert.mockResolvedValue(undefined);
-
-      const complexPayload = createTestPayload({
-        display_name: 'User with "quotes" and special chars: \n\t',
-      });
-
-      await repository.saveSettings(userId, complexPayload, version, timestamp, requestId, true);
-
-      expect(mockDb.insert).toHaveBeenCalledWith("usersettings", {
-        matrix_id: userId,
-        settings: JSON.stringify(complexPayload),
-        version,
-        timestamp,
-        request_id: requestId,
-      });
     });
   });
 });

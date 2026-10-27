@@ -216,6 +216,8 @@ export class SettingsRepository {
           "version",
           "timestamp",
           "request_id",
+          "avatar_source",
+          "avatar_mxc",
         ],
         {
           matrix_id: userId,
@@ -253,6 +255,14 @@ export class SettingsRepository {
         version: dbRow.version as number,
         timestamp: validTimestamp,
         request_id: dbRow.request_id as string,
+        ...(dbRow.avatar_source && dbRow.avatar_mxc
+          ? {
+              avatar: {
+                source: String(dbRow.avatar_source),
+                mxc: String(dbRow.avatar_mxc),
+              },
+            }
+          : {}),
       };
     } catch (error) {
       this.#logger.error(
@@ -263,83 +273,67 @@ export class SettingsRepository {
   }
 
   /**
-   * Saves user settings to the database.
-   * Inserts a new row for new users or updates existing row for returning users.
+   * Saves user settings unless the stored ones are as recent or more, in one
+   * statement, so that two updates of the same user written at once keep the
+   * newer one.
    *
    * @param userId - The Matrix user ID
    * @param payload - The settings payload to persist
    * @param version - The version number of the settings
    * @param timestamp - The timestamp when settings were last modified
    * @param requestId - The unique request ID for idempotency tracking
-   * @param isNewUser - Whether this is a new user (insert) or existing user (update)
+   * @returns Whether the settings were saved
    * @throws Error if database operation fails
    */
-  // biome-ignore lint/complexity/useMaxParams: one argument per column of the cache row
-  async saveSettings(
+  async saveIfNewer(
     userId: string,
     payload: ISettingsPayload,
     version: number,
     timestamp: number,
     requestId: string,
-    isNewUser: boolean,
-  ): Promise<void> {
-    const cacheData = {
-      matrix_id: userId,
-      settings: JSON.stringify(payload),
-      version,
-      timestamp,
-      request_id: requestId,
-    };
-
-    if (isNewUser) {
-      this.#logger.debug(`Inserting new cache entry for ${userId}`);
-      try {
-        await this.#db.insert("usersettings", cacheData);
-        this.#logger.debug(`Successfully inserted cache entry for ${userId}`);
-      } catch (error) {
-        // Handle TOCTOU race: another request may have inserted first
-        const errorMsg = error instanceof Error ? error.message.toLowerCase() : "";
-        const errorCode = (
-          error as
-            | {
-                code?: string;
-              }
-            | undefined
-        )?.code;
-        const isDuplicateKey =
-          errorMsg.includes("duplicate") ||
-          errorMsg.includes("unique") ||
-          errorMsg.includes("constraint") ||
-          errorCode === "23505"; // PostgreSQL unique violation
-
-        if (isDuplicateKey) {
-          this.#logger.debug(
-            `Duplicate key on insert for ${userId}, falling back to update (concurrent insert detected)`,
-          );
-          await this.#db.update("usersettings", cacheData, "matrix_id", userId);
-          this.#logger.debug(`Successfully updated cache entry for ${userId} (after insert race)`);
-        } else {
-          this.#logger.error(
-            `Failed to insert cache entry for ${userId}: ${error instanceof Error ? error.message : "Unknown error"}`,
-          );
-          throw error;
-        }
-      }
-    } else {
-      this.#logger.debug(`Updating cache entry for ${userId}`);
-      try {
-        await this.#db.update("usersettings", cacheData, "matrix_id", userId);
-        this.#logger.debug(`Successfully updated cache entry for ${userId}`);
-      } catch (error) {
-        this.#logger.error(
-          `Failed to update cache entry for ${userId}: ${error instanceof Error ? error.message : "Unknown error"}`,
-        );
-        throw error;
-      }
+  ): Promise<boolean> {
+    try {
+      const written = await this.#db.upsertIfNewer(
+        "usersettings",
+        {
+          matrix_id: userId,
+          settings: JSON.stringify(payload),
+          version,
+          timestamp,
+          request_id: requestId,
+        },
+        "matrix_id",
+        [
+          "version",
+          "timestamp",
+        ],
+      );
+      this.#logger.debug(
+        `${written.length > 0 ? "Saved" : "Kept the newer stored"} settings for ${userId}: version=${version}, timestamp=${timestamp}, request_id=${requestId}`,
+      );
+      return written.length > 0;
+    } catch (error) {
+      this.#logger.error(
+        `Failed to save settings for ${userId}: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
+      throw error;
     }
+  }
 
-    this.#logger.debug(
-      `Cache updated for ${userId}: version=${version}, timestamp=${timestamp}, request_id=${requestId}`,
+  /**
+   * Remembers the mxc URL an avatar URL became once uploaded, so that the
+   * avatar is not downloaded again while the Matrix profile shows it.
+   * Whatever the version stored, as it describes the upload, not the settings.
+   */
+  async saveAvatar(userId: string, source: string, mxc: string): Promise<void> {
+    await this.#db.update(
+      "usersettings",
+      {
+        avatar_source: source,
+        avatar_mxc: mxc,
+      },
+      "matrix_id",
+      userId,
     );
   }
 
