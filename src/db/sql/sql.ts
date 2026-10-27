@@ -1,8 +1,8 @@
 import type { Logger as PinoLogger } from "pino";
 
-import type { DatabaseConfig, DbGetResult } from "../types";
-import type { PgDatabase } from "./pg";
-import type { SQLiteDatabase } from "./sqlite";
+import type { DatabaseConfig, DbGetResult } from "../types.js";
+import type { PgDatabase } from "./pg.js";
+import type { SQLiteDatabase } from "./sqlite.js";
 
 export type CreateDbMethod<T extends string> = (
   conf: DatabaseConfig,

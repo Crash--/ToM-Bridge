@@ -1,13 +1,13 @@
 // Main Database class
-export { default, default as Database } from "./database";
+export { default, default as Database } from "./database.js";
 // Utilities
-export { default as createTables } from "./sql/_createTables";
+export { default as createTables } from "./sql/_createTables.js";
 // Re-export adapter database types
-export type { PgDatabase } from "./sql/pg";
+export type { PgDatabase } from "./sql/pg.js";
 // SQL adapters
-export { default as Pg } from "./sql/pg";
-export type { SQLiteDatabase, SQLiteStatement } from "./sql/sqlite";
-export { default as SQLite } from "./sql/sqlite";
+export { default as Pg } from "./sql/pg.js";
+export type { SQLiteDatabase, SQLiteStatement } from "./sql/sqlite.js";
+export { default as SQLite } from "./sql/sqlite.js";
 // Types
 export type {
   ColumnDefinition,
@@ -18,4 +18,4 @@ export type {
   ISQLCondition,
   SqlComparaisonOperator,
   SupportedDatabases,
-} from "./types";
+} from "./types.js";

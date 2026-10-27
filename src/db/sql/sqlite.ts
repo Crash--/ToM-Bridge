@@ -1,9 +1,9 @@
 import type { Logger as PinoLogger } from "pino";
 import type { Database, Statement } from "sqlite3";
 
-import type { ColumnDefinition, ColumnInfo, DatabaseConfig, DbBackend, DbGetResult, ISQLCondition } from "../types";
-import createTables from "./_createTables";
-import SQL from "./sql";
+import type { ColumnDefinition, ColumnInfo, DatabaseConfig, DbBackend, DbGetResult, ISQLCondition } from "../types.js";
+import createTables from "./_createTables.js";
+import SQL from "./sql.js";
 
 export type SQLiteDatabase = Database;
 

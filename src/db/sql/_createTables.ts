@@ -1,7 +1,7 @@
 import type { Logger as PinoLogger } from "pino";
 
-import type Pg from "./pg";
-import type SQLite from "./sqlite";
+import type Pg from "./pg.js";
+import type SQLite from "./sqlite.js";
 
 function createTables<T extends string>(
   db: SQLite<T> | Pg<T>,

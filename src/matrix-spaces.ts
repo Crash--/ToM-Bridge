@@ -1,6 +1,6 @@
 import type { MatrixClient } from "@vector-im/matrix-bot-sdk";
 
-import { MODERATOR_LEVEL, POSTER_LEVEL, type SpaceMatrix } from "./space-provisioner";
+import { MODERATOR_LEVEL, POSTER_LEVEL, type SpaceMatrix } from "./space-provisioner.js";
 
 const BRIDGE_LEVEL = 100;
 

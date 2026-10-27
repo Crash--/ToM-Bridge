@@ -7,11 +7,11 @@
 
 ## Allow package definition files
 !package.json
-!bun.lock
+!package-lock.json
 
 ## Allow build configuration files
-!bunup.config.ts
 !tsconfig.json
+!tsconfig.build.json
 
 ## Allow source files
 !src/**
@@ -19,6 +19,3 @@
 ## Ensure test files are not imported
 src/__mocks__/
 src/**/*.test.ts
-
-## Allow patches
-!patches/**

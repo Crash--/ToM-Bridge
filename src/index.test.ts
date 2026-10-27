@@ -1,39 +1,38 @@
 /* eslint-disable @typescript-eslint/promise-function-async */
-import { beforeAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   AppServiceRegistration,
-  DeadLetterError,
   Bridge as MockBridge,
   Cli as MockCli,
   Database as MockDatabase,
   Logger as MockLogger,
   RabbitMQClient as MockRabbitMQClient,
-} from "./__mocks__/shared";
-import type { BridgeConfig } from "./types";
+} from "./__mocks__/shared.js";
+import type { BridgeConfig } from "./types.js";
 
 // Register the shared leaf-dependency mocks for this test file
-mock.module("matrix-appservice-bridge", () => ({
+vi.mock("matrix-appservice-bridge", () => ({
   AppServiceRegistration,
   Bridge: MockBridge,
   Cli: MockCli,
   Logger: MockLogger,
 }));
-mock.module("@linagora/rabbitmq-client", () => ({
+vi.mock("@linagora/rabbitmq-client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@linagora/rabbitmq-client")>()),
   RabbitMQClient: MockRabbitMQClient,
-  DeadLetterError,
 }));
-mock.module("./db", () => ({
+vi.mock("./db/index.js", () => ({
   Database: MockDatabase,
 }));
 
-const mockUploadContentFromUrl = mock(() => Promise.resolve("mxc://example.com/uploaded123"));
-const mockUploadContent = mock(() => Promise.resolve("mxc://example.com/uploaded123"));
-const mockSetDisplayName = mock(() => Promise.resolve());
-const mockSetAvatarUrl = mock(() => Promise.resolve());
-const mockEnsureRegistered = mock(() => Promise.resolve());
-const mockIsSelfAdmin = mock(() => Promise.resolve(true));
-const mockUpsertUser = mock(() => Promise.resolve());
+const mockUploadContentFromUrl = vi.fn(() => Promise.resolve("mxc://example.com/uploaded123"));
+const mockUploadContent = vi.fn(() => Promise.resolve("mxc://example.com/uploaded123"));
+const mockSetDisplayName = vi.fn(() => Promise.resolve());
+const mockSetAvatarUrl = vi.fn(() => Promise.resolve());
+const mockEnsureRegistered = vi.fn(() => Promise.resolve());
+const mockIsSelfAdmin = vi.fn(() => Promise.resolve(true));
+const mockUpsertUser = vi.fn(() => Promise.resolve());
 
 const mockIntent = {
   ensureRegistered: mockEnsureRegistered,
@@ -51,11 +50,11 @@ const mockIntent = {
   },
 };
 
-const mockRun = mock(() => Promise.resolve());
-const mockGetBot = mock().mockReturnValue({
-  getUserId: mock().mockReturnValue("@bot:example.com"),
+const mockRun = vi.fn(() => Promise.resolve());
+const mockGetBot = vi.fn().mockReturnValue({
+  getUserId: vi.fn().mockReturnValue("@bot:example.com"),
 });
-const mockGetIntent = mock().mockReturnValue(mockIntent);
+const mockGetIntent = vi.fn().mockReturnValue(mockIntent);
 
 const mockBridge = {
   run: mockRun,
@@ -63,11 +62,11 @@ const mockBridge = {
   getIntent: mockGetIntent,
 };
 
-const mockDbGet = mock().mockResolvedValue([] as unknown[]);
-const mockDbInsert = mock(() => Promise.resolve());
-const mockDbUpdate = mock(() => Promise.resolve());
-const mockDbClose = mock();
-const mockDbEnsureColumns = mock(() => Promise.resolve());
+const mockDbGet = vi.fn().mockResolvedValue([] as unknown[]);
+const mockDbInsert = vi.fn(() => Promise.resolve());
+const mockDbUpdate = vi.fn(() => Promise.resolve());
+const mockDbClose = vi.fn();
+const mockDbEnsureColumns = vi.fn(() => Promise.resolve());
 
 const mockDb = {
   ready: Promise.resolve(),
@@ -78,11 +77,11 @@ const mockDb = {
   ensureColumns: mockDbEnsureColumns,
 };
 
-const mockClientInit = mock(() => Promise.resolve());
-const mockClientClose = mock(() => Promise.resolve());
+const mockClientInit = vi.fn(() => Promise.resolve());
+const mockClientClose = vi.fn(() => Promise.resolve());
 let messageHandler: (message: Record<string, unknown>) => Promise<void>;
 
-const mockClientSubscribe = mock((_exchange: string, _routingKey: string, _queue: string, handler: any) => {
+const mockClientSubscribe = vi.fn((_exchange: string, _routingKey: string, _queue: string, handler: any) => {
   messageHandler = handler;
   return Promise.resolve();
 });
@@ -94,9 +93,18 @@ const mockClient = {
 };
 
 beforeAll(() => {
-  MockBridge.mockImplementation(() => mockBridge);
-  MockRabbitMQClient.mockImplementation(() => mockClient);
-  MockDatabase.mockImplementation(() => mockDb);
+  // biome-ignore lint/complexity/useArrowFunction: called with new, which vitest refuses on an arrow function
+  MockBridge.mockImplementation(function () {
+    return mockBridge;
+  });
+  // biome-ignore lint/complexity/useArrowFunction: called with new
+  MockRabbitMQClient.mockImplementation(function () {
+    return mockClient;
+  });
+  // biome-ignore lint/complexity/useArrowFunction: called with new
+  MockDatabase.mockImplementation(function () {
+    return mockDb;
+  });
 });
 
 // Create a proper fetch mock for avatar downloads
@@ -115,12 +123,12 @@ const createMockFetchResponse = (options: { ok?: boolean; status?: number; statu
 });
 
 beforeEach(() => {
-  mock.clearAllMocks();
+  vi.clearAllMocks();
   mockDbGet.mockResolvedValue([] as unknown[]);
   mockUploadContentFromUrl.mockResolvedValue("mxc://example.com/uploaded123");
   mockUploadContent.mockResolvedValue("mxc://example.com/uploaded123");
   // Mock global fetch for avatar downloads
-  global.fetch = mock(() => Promise.resolve(createMockFetchResponse())) as any;
+  global.fetch = vi.fn(() => Promise.resolve(createMockFetchResponse())) as any;
   // Re-bind capture after clearAllMocks
   mockClientSubscribe.mockImplementation((_exchange: string, _routingKey: string, _queue: string, handler: any) => {
     messageHandler = handler;
@@ -175,7 +183,7 @@ const createTestMessage = (overrides: Record<string, any> = {}) => ({
 
 describe("CommonSettingsBridge - Message Parsing", () => {
   it("should process a valid message", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -192,7 +200,7 @@ describe("CommonSettingsBridge - Message Parsing", () => {
   });
 
   it("should ack-and-drop messages where matrix_id is missing (no retry storm)", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -211,7 +219,7 @@ describe("CommonSettingsBridge - Message Parsing", () => {
 
 describe("CommonSettingsBridge - Avatar URL Resolution", () => {
   it("should use MXC URL directly when avatar starts with mxc://", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -231,7 +239,7 @@ describe("CommonSettingsBridge - Avatar URL Resolution", () => {
   });
 
   it("should download and upload HTTP avatar URL", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -257,7 +265,7 @@ describe("CommonSettingsBridge - Avatar URL Resolution", () => {
   });
 
   it("should propagate upload errors", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -276,7 +284,7 @@ describe("CommonSettingsBridge - Avatar URL Resolution", () => {
   });
 
   it("should use uploaded MXC URL with admin API in EXCLUSIVE mode", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig("exclusive");
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -307,7 +315,7 @@ describe("CommonSettingsBridge - Avatar URL Resolution", () => {
 
 describe("CommonSettingsBridge - Matrix Updates", () => {
   it("should use admin API in EXCLUSIVE mode for display name", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig("exclusive");
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -323,7 +331,7 @@ describe("CommonSettingsBridge - Matrix Updates", () => {
   });
 
   it("should use intent API in DISABLED mode for display name", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig("disabled");
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -336,7 +344,7 @@ describe("CommonSettingsBridge - Matrix Updates", () => {
   });
 
   it("should fallback to admin API on M_FORBIDDEN in FALLBACK mode", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig("fallback");
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -359,7 +367,7 @@ describe("CommonSettingsBridge - Matrix Updates", () => {
 
 describe("CommonSettingsBridge - Change Detection", () => {
   it("should not update display name when unchanged", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -389,7 +397,7 @@ describe("CommonSettingsBridge - Change Detection", () => {
   });
 
   it("should update display name when changed", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -427,7 +435,7 @@ describe("CommonSettingsBridge - Change Detection", () => {
 
 describe("CommonSettingsBridge - Lifecycle", () => {
   it("should start successfully", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -440,7 +448,7 @@ describe("CommonSettingsBridge - Lifecycle", () => {
   });
 
   it("should stop successfully", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
@@ -452,7 +460,7 @@ describe("CommonSettingsBridge - Lifecycle", () => {
   });
 
   it("should check admin privileges on start", async () => {
-    const { CommonSettingsBridge } = await import("./index");
+    const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 

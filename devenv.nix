@@ -62,7 +62,8 @@ in
       "tree-sitter" = {
         type = "local";
         command = [
-          "bunx"
+          "npx"
+          "-y"
           "@nendo/tree-sitter-mcp"
           "--mcp"
         ];
@@ -77,8 +78,9 @@ in
   languages = {
     javascript = {
       enable = true;
-      bun.enable = true;
-      bun.install.enable = false;
+      package = pkgs.nodejs_24;
+      npm.enable = true;
+      npm.install.enable = false;
       lsp.enable = true;
     };
     nix = {
@@ -160,7 +162,7 @@ in
     echo -e "\t- Synapse     https://matrix.${domain}:${toString config.twake.caddy.port}"
     echo -e "\t- RabbitMQ    127.0.0.1:${toString config.twake.rabbitmq.port}"
     echo -e "\t- Postgres    127.0.0.1:${toString config.twake.pg.port}"
-    echo -e "\t- ToM Bridge  (bun dev with watch mode)"
+    echo -e "\t- ToM Bridge  (npm run dev with watch mode)"
     echo
     echo "DATABASES"
     echo
@@ -175,13 +177,13 @@ in
     echo "NEXT STEPS"
     echo
     echo -e "\t# 1. Install dependencies"
-    echo -e "\tbun install"
+    echo -e "\tnpm ci"
     echo
     echo -e "\t# 2. Trust the local mkcert CA (so Chrome/Firefox accept the certs)"
     echo -e "\tmkcert -install"
     echo
     echo -e "\t# 3. Start everything with cached sudo (lets mkcert store its root CA)"
-    echo -e "\t#    This starts Caddy, Synapse, RabbitMQ, Postgres and the ToM Bridge (bun dev, watch mode)"
+    echo -e "\t#    This starts Caddy, Synapse, RabbitMQ, Postgres and the ToM Bridge (npm run dev, watch mode)"
     echo -e "\tsudo -v && devenv up"
     echo
     echo "HELPER SCRIPTS"
@@ -189,7 +191,7 @@ in
     echo -e "\t # Register a Matrix user"
     echo -e "\t _twp_synapse_register_user <user> <pass> [--admin]"
     echo
-    echo -e "\t # Run the bridge manually (bun dev) against the generated config"
+    echo -e "\t # Run the bridge manually (npm run dev) against the generated config"
     echo -e "\t _twp_bridge_run"
     echo
     echo -e "\t # Send a RabbitMQ common-settings payload to the bridge"

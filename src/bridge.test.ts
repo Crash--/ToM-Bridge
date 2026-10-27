@@ -1,38 +1,37 @@
-import { afterEach, beforeEach, describe, expect, it, type Mock, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 import {
   AppServiceRegistration,
   Bridge,
   Cli,
-  DeadLetterError,
   Logger,
   Database as MockDatabase,
   RabbitMQClient as MockRabbitMQClient,
-} from "./__mocks__/shared";
-import { MatrixProfileUpdater } from "./matrix-profile-updater";
-import { SettingsRepository } from "./settings-repository";
-import type { BridgeConfig, ISettingsPayload, StoredUserSettings } from "./types";
+} from "./__mocks__/shared.js";
+import { MatrixProfileUpdater } from "./matrix-profile-updater.js";
+import { SettingsRepository } from "./settings-repository.js";
+import type { BridgeConfig, ISettingsPayload, StoredUserSettings } from "./types.js";
 
 type AnyFn = (...args: any[]) => any;
 
 // Register the shared leaf-dependency mocks for this test file. The real
 // SettingsRepository and MatrixProfileUpdater run against these mocks and are
 // observed through prototype spies below.
-mock.module("matrix-appservice-bridge", () => ({
+vi.mock("matrix-appservice-bridge", () => ({
   AppServiceRegistration,
   Bridge,
   Cli,
   Logger,
 }));
-mock.module("@linagora/rabbitmq-client", () => ({
+vi.mock("@linagora/rabbitmq-client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@linagora/rabbitmq-client")>()),
   RabbitMQClient: MockRabbitMQClient,
-  DeadLetterError,
 }));
-mock.module("./db", () => ({
+vi.mock("./db/index.js", () => ({
   Database: MockDatabase,
 }));
 
-const { CommonSettingsBridge } = await import("./bridge");
+const { CommonSettingsBridge } = await import("./bridge.js");
 
 describe("CommonSettingsBridge", () => {
   let bridge: InstanceType<typeof CommonSettingsBridge>;
@@ -62,7 +61,7 @@ describe("CommonSettingsBridge", () => {
   let mockAdminApis: any;
 
   beforeEach(() => {
-    mock.clearAllMocks();
+    vi.clearAllMocks();
 
     // Setup config
     mockConfig = {
@@ -94,42 +93,48 @@ describe("CommonSettingsBridge", () => {
     // Mock database
     mockDatabase = {
       ready: Promise.resolve(),
-      get: mock(),
-      insert: mock(),
-      update: mock(),
-      getHigherThan: mock().mockResolvedValue([]),
-      deleteEqual: mock().mockResolvedValue(undefined),
-      close: mock(),
-      ensureColumns: mock().mockResolvedValue(undefined),
-      withLock: mock((_key: string, fn: () => Promise<unknown>) => fn()),
+      get: vi.fn(),
+      insert: vi.fn(),
+      update: vi.fn(),
+      getHigherThan: vi.fn().mockResolvedValue([]),
+      deleteEqual: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn(),
+      ensureColumns: vi.fn().mockResolvedValue(undefined),
+      withLock: vi.fn((_key: string, fn: () => Promise<unknown>) => fn()),
     } as any;
-    MockDatabase.mockImplementation(() => mockDatabase);
+    // biome-ignore lint/complexity/useArrowFunction: called with new, which vitest refuses on an arrow function
+    MockDatabase.mockImplementation(function () {
+      return mockDatabase;
+    });
 
     // Mock RabbitMQ client
     mockClient = {
-      init: mock().mockResolvedValue(undefined),
-      subscribe: mock().mockResolvedValue(undefined),
-      publish: mock().mockResolvedValue(undefined),
-      close: mock().mockResolvedValue(undefined),
+      init: vi.fn().mockResolvedValue(undefined),
+      subscribe: vi.fn().mockResolvedValue(undefined),
+      publish: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
     } as any;
-    MockRabbitMQClient.mockImplementation(() => mockClient);
+    // biome-ignore lint/complexity/useArrowFunction: called with new
+    MockRabbitMQClient.mockImplementation(function () {
+      return mockClient;
+    });
 
     // Mock admin APIs
     mockAdminApis = {
-      isSelfAdmin: mock().mockResolvedValue(true),
-      upsertUser: mock().mockResolvedValue(undefined),
+      isSelfAdmin: vi.fn().mockResolvedValue(true),
+      upsertUser: vi.fn().mockResolvedValue(undefined),
     };
 
     // Mock Intent
     mockIntent = {
-      ensureRegistered: mock().mockResolvedValue(undefined),
-      setDisplayName: mock().mockResolvedValue(undefined),
-      setAvatarUrl: mock().mockResolvedValue(undefined),
+      ensureRegistered: vi.fn().mockResolvedValue(undefined),
+      setDisplayName: vi.fn().mockResolvedValue(undefined),
+      setAvatarUrl: vi.fn().mockResolvedValue(undefined),
       matrixClient: {
         adminApis: {
           synapse: mockAdminApis,
         },
-        uploadContentFromUrl: mock().mockResolvedValue("mxc://example.com/avatar123"),
+        uploadContentFromUrl: vi.fn().mockResolvedValue("mxc://example.com/avatar123"),
       },
     } as any;
 
@@ -149,12 +154,12 @@ describe("CommonSettingsBridge", () => {
     mockAdminApis = mockIntent.matrixClient.adminApis.synapse;
 
     // Spy on the real repository / updater prototypes
-    spyGetUserSettings = spyOn(SettingsRepository.prototype, "getUserSettings");
-    spySaveSettings = spyOn(SettingsRepository.prototype, "saveSettings");
-    spyProcessChanges = spyOn(MatrixProfileUpdater.prototype, "processChanges");
+    spyGetUserSettings = vi.spyOn(SettingsRepository.prototype, "getUserSettings");
+    spySaveSettings = vi.spyOn(SettingsRepository.prototype, "saveSettings");
+    spyProcessChanges = vi.spyOn(MatrixProfileUpdater.prototype, "processChanges");
 
     // Mock global fetch: the real MatrixProfileUpdater downloads avatars
-    global.fetch = mock(() =>
+    global.fetch = vi.fn(() =>
       Promise.resolve({
         ok: true,
         status: 200,
@@ -353,7 +358,7 @@ describe("CommonSettingsBridge", () => {
       } as const;
 
       beforeEach(() => {
-        mockIntent.matrixClient.doRequest = mock().mockResolvedValue({});
+        mockIntent.matrixClient.doRequest = vi.fn().mockResolvedValue({});
       });
 
       const startWithDeletion = async (): Promise<(message: Record<string, unknown>) => Promise<void>> => {
@@ -450,13 +455,13 @@ describe("CommonSettingsBridge", () => {
 
       beforeEach(() => {
         Object.assign(mockIntent.matrixClient, {
-          resolveRoom: mock().mockResolvedValue("!space:example.com"),
-          doRequest: mock().mockResolvedValue({}),
-          getRoomStateEvent: mock().mockResolvedValue({
+          resolveRoom: vi.fn().mockResolvedValue("!space:example.com"),
+          doRequest: vi.fn().mockResolvedValue({}),
+          getRoomStateEvent: vi.fn().mockResolvedValue({
             users: {},
           }),
-          sendStateEvent: mock().mockResolvedValue("$event"),
-          getRoomMembers: mock().mockResolvedValue([]),
+          sendStateEvent: vi.fn().mockResolvedValue("$event"),
+          getRoomMembers: vi.fn().mockResolvedValue([]),
         });
         mockDatabase.get.mockResolvedValue([]);
         mockDatabase.update.mockResolvedValue([]);
@@ -632,7 +637,7 @@ describe("CommonSettingsBridge", () => {
         ]);
 
         await startWithSpaces();
-        await Bun.sleep(0);
+        await new Promise((resolve) => setTimeout(resolve, 0));
 
         expect(mockIntent.matrixClient.doRequest).toHaveBeenCalledWith(
           "DELETE",

@@ -1,7 +1,7 @@
 // Shared mock objects for the bridge's leaf dependencies. Test files register
-// them via mock.module() with these exact objects so every consumer (including
+// them via vi.mock() with these exact objects so every consumer (including
 // cached module instances) sees the same mocks.
-import { type Mock, mock } from "bun:test";
+import { type Mock, vi } from "vitest";
 
 type AnyFn = (...args: any[]) => any;
 type MockFn = Mock<AnyFn>;
@@ -11,11 +11,11 @@ const sharedBridgeMethods: {
   getBot: MockFn;
   getIntent: MockFn;
 } = {
-  run: mock<AnyFn>().mockResolvedValue(undefined),
-  getBot: mock<AnyFn>().mockReturnValue({
-    getUserId: mock<AnyFn>().mockReturnValue("@bot:example.com"),
+  run: vi.fn<AnyFn>().mockResolvedValue(undefined),
+  getBot: vi.fn<AnyFn>().mockReturnValue({
+    getUserId: vi.fn<AnyFn>().mockReturnValue("@bot:example.com"),
   }),
-  getIntent: mock<AnyFn>(),
+  getIntent: vi.fn<AnyFn>(),
 };
 
 export const mockIntent: {
@@ -33,18 +33,18 @@ export const mockIntent: {
     uploadContent: MockFn;
   };
 } = {
-  ensureRegistered: mock<AnyFn>().mockResolvedValue(undefined),
-  setDisplayName: mock<AnyFn>().mockResolvedValue(undefined),
-  setAvatarUrl: mock<AnyFn>().mockResolvedValue(undefined),
+  ensureRegistered: vi.fn<AnyFn>().mockResolvedValue(undefined),
+  setDisplayName: vi.fn<AnyFn>().mockResolvedValue(undefined),
+  setAvatarUrl: vi.fn<AnyFn>().mockResolvedValue(undefined),
   matrixClient: {
     adminApis: {
       synapse: {
-        isSelfAdmin: mock<AnyFn>().mockResolvedValue(true),
-        upsertUser: mock<AnyFn>().mockResolvedValue(undefined),
+        isSelfAdmin: vi.fn<AnyFn>().mockResolvedValue(true),
+        upsertUser: vi.fn<AnyFn>().mockResolvedValue(undefined),
       },
     },
-    uploadContentFromUrl: mock<AnyFn>().mockResolvedValue("mxc://example.com/avatar123"),
-    uploadContent: mock<AnyFn>().mockResolvedValue("mxc://example.com/avatar123"),
+    uploadContentFromUrl: vi.fn<AnyFn>().mockResolvedValue("mxc://example.com/avatar123"),
+    uploadContent: vi.fn<AnyFn>().mockResolvedValue("mxc://example.com/avatar123"),
   },
 };
 sharedBridgeMethods.getIntent.mockReturnValue(mockIntent);
@@ -57,7 +57,7 @@ type BridgeInstance = {
 
 export const Bridge: Mock<AnyFn> & {
   new (_opts?: unknown): BridgeInstance;
-} = mock(function Bridge(_opts?: unknown) {
+} = vi.fn(function Bridge(_opts?: unknown) {
   return sharedBridgeMethods;
 }) as Mock<AnyFn> & {
   new (_opts?: unknown): BridgeInstance;
@@ -65,34 +65,32 @@ export const Bridge: Mock<AnyFn> & {
 
 export const Logger: Mock<AnyFn> & {
   configure: MockFn;
-} = mock(function Logger(_name?: string) {
+} = vi.fn(function Logger(_name?: string) {
   return {
-    debug: mock<AnyFn>(),
-    info: mock<AnyFn>(),
-    warn: mock<AnyFn>(),
-    error: mock<AnyFn>(),
+    debug: vi.fn<AnyFn>(),
+    info: vi.fn<AnyFn>(),
+    warn: vi.fn<AnyFn>(),
+    error: vi.fn<AnyFn>(),
   };
 }) as Mock<AnyFn> & {
   configure: MockFn;
 };
-Logger.configure = mock<AnyFn>();
+Logger.configure = vi.fn<AnyFn>();
 
-export const Cli: MockFn = mock(function Cli() {
+export const Cli: MockFn = vi.fn(function Cli() {
   return {
-    run: mock<AnyFn>(),
+    run: vi.fn<AnyFn>(),
   };
 });
 
 export const AppServiceRegistration: {
   generateToken: MockFn;
 } = {
-  generateToken: mock<AnyFn>().mockReturnValue("mock-token"),
+  generateToken: vi.fn<AnyFn>().mockReturnValue("mock-token"),
 };
 
 // @linagora/rabbitmq-client
-export const RabbitMQClient: MockFn = mock<AnyFn>();
-// What the space events throw to reach the dead-letter queue: the mocked module still exports the real one
-export { DeadLetterError } from "@linagora/rabbitmq-client";
+export const RabbitMQClient: MockFn = vi.fn<AnyFn>();
 
 // ./db
-export const Database: MockFn = mock<AnyFn>();
+export const Database: MockFn = vi.fn<AnyFn>();

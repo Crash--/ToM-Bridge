@@ -1,8 +1,8 @@
 import type { Logger as PinoLogger } from "pino";
 
-import Pg from "./sql/pg";
-import SQLite from "./sql/sqlite";
-import type { ColumnDefinition, ColumnInfo, DatabaseConfig, DbBackend, DbGetResult, ISQLCondition } from "./types";
+import Pg from "./sql/pg.js";
+import SQLite from "./sql/sqlite.js";
+import type { ColumnDefinition, ColumnInfo, DatabaseConfig, DbBackend, DbGetResult, ISQLCondition } from "./types.js";
 
 /**
  * Generic Database class that provides a unified interface for SQLite and PostgreSQL

@@ -1,7 +1,7 @@
 import type { Logger } from "matrix-appservice-bridge";
 
-import type { Database, DbGetResult } from "./db";
-import type { ISettingsPayload, StoredUserSettings, UserSettingsTableName } from "./types";
+import type { Database, DbGetResult } from "./db/index.js";
+import type { ISettingsPayload, StoredUserSettings, UserSettingsTableName } from "./types.js";
 
 /**
  * Formats a Unix timestamp (milliseconds) as an ISO 8601 string.

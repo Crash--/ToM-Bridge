@@ -5,9 +5,9 @@
  */
 
 // Re-export main bridge class
-export { CommonSettingsBridge } from "./bridge";
+export { CommonSettingsBridge } from "./bridge.js";
 // Re-export types and errors
-export * from "./types";
+export * from "./types.js";
 
 // =============================================================================
 // CLI (merged from cli.ts)
@@ -15,8 +15,8 @@ export * from "./types";
 
 import { AppServiceRegistration, Cli, Logger } from "matrix-appservice-bridge";
 
-import { CommonSettingsBridge } from "./bridge";
-import type { BridgeConfig } from "./types";
+import { CommonSettingsBridge } from "./bridge.js";
+import type { BridgeConfig } from "./types.js";
 
 const log = new Logger("CLI");
 

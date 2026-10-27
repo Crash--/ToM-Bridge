@@ -1,9 +1,10 @@
 import type { Logger } from "matrix-appservice-bridge";
+import { v5 as uuidv5 } from "uuid";
 
 import { DeadLetterError, type RabbitMQMessageProperties } from "@linagora/rabbitmq-client";
 
-import { toSynapseLocalpart } from "./account-eraser";
-import type { SpacesConfig } from "./types";
+import { toSynapseLocalpart } from "./account-eraser.js";
+import type { SpacesConfig } from "./types.js";
 
 /** Power level of members allowed to post. Membership and settings stay at 100, the bridge's. */
 export const POSTER_LEVEL = 50;
@@ -12,7 +13,7 @@ export const PROVISIONED_TYPE = "com.twake.chat.space.provisioned.v1";
 
 export const SYNC_REQUESTED = "twake.space.sync.requested";
 
-const PROVISIONED_NAMESPACE: string = Bun.randomUUIDv5(PROVISIONED_TYPE, "url");
+const PROVISIONED_NAMESPACE: string = uuidv5(PROVISIONED_TYPE, uuidv5.URL);
 
 /** How long a deleted space's Matrix space is kept, without members, before it is purged. */
 export const RETENTION_MS: number = 30 * 24 * 60 * 60 * 1000;
@@ -412,7 +413,7 @@ export function createSpaceEventHandler({
     await publish(PROVISIONED_TYPE, {
       specversion: "1.0",
       // The same on every republish, so TwakeSpace drops the one of each nightly sync as a duplicate
-      id: Bun.randomUUIDv5(`${spaceId}/${roomId}`, PROVISIONED_NAMESPACE),
+      id: uuidv5(`${spaceId}/${roomId}`, PROVISIONED_NAMESPACE),
       source: "twake://chat",
       type: PROVISIONED_TYPE,
       time: new Date().toISOString(),

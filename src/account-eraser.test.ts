@@ -1,12 +1,11 @@
-import { describe, expect, it, mock } from "bun:test";
-
 import type { Logger } from "matrix-appservice-bridge";
+import { describe, expect, it, vi } from "vitest";
 
-import { createUserDeletedHandler, toSynapseLocalpart } from "./account-eraser";
+import { createUserDeletedHandler, toSynapseLocalpart } from "./account-eraser.js";
 
 const log = {
-  info: mock(),
-  warn: mock(),
+  info: vi.fn(),
+  warn: vi.fn(),
 } as unknown as Logger;
 
 describe("toSynapseLocalpart", () => {
@@ -40,7 +39,7 @@ describe("toSynapseLocalpart", () => {
       "Bob O'Neil",
       "bob=20o=27neil",
     ],
-  ])("maps %p like Synapse", (username, localpart) => {
+  ])("maps %j like Synapse", (username, localpart) => {
     expect(toSynapseLocalpart(username)).toBe(localpart);
   });
 });
@@ -53,7 +52,7 @@ describe("createUserDeletedHandler", () => {
   };
 
   it("erases the account named after the uid", async () => {
-    const eraseAccount = mock(async () => {});
+    const eraseAccount = vi.fn(async () => {});
 
     await createUserDeletedHandler(eraseAccount, "example.com", "uid", log)(deleted);
 
@@ -61,7 +60,7 @@ describe("createUserDeletedHandler", () => {
   });
 
   it("erases the account named after the email", async () => {
-    const eraseAccount = mock(async () => {});
+    const eraseAccount = vi.fn(async () => {});
 
     await createUserDeletedHandler(eraseAccount, "example.com", "email", log)(deleted);
 
@@ -82,14 +81,14 @@ describe("createUserDeletedHandler", () => {
       },
     ],
   ] as const)("rejects a message without the %s login, so it is dead-lettered", async (localpartFrom, message) => {
-    const eraseAccount = mock(async () => {});
+    const eraseAccount = vi.fn(async () => {});
 
     await expect(createUserDeletedHandler(eraseAccount, "example.com", localpartFrom, log)(message)).rejects.toThrow();
     expect(eraseAccount).not.toHaveBeenCalled();
   });
 
   it("skips a Matrix ID longer than Synapse allows, since no such account exists", async () => {
-    const eraseAccount = mock(async () => {});
+    const eraseAccount = vi.fn(async () => {});
 
     await createUserDeletedHandler(
       eraseAccount,
@@ -106,7 +105,7 @@ describe("createUserDeletedHandler", () => {
   it("refuses an unknown localpartFrom instead of guessing", () => {
     expect(() =>
       createUserDeletedHandler(
-        mock(async () => {}),
+        vi.fn(async () => {}),
         "example.com",
         "UID" as unknown as "uid",
         log,
@@ -115,7 +114,7 @@ describe("createUserDeletedHandler", () => {
   });
 
   it("fails when the erasure fails, so the message is retried", async () => {
-    const eraseAccount = mock(() => Promise.reject(new Error("Synapse answered 500")));
+    const eraseAccount = vi.fn(() => Promise.reject(new Error("Synapse answered 500")));
 
     await expect(createUserDeletedHandler(eraseAccount, "example.com", "email", log)(deleted)).rejects.toThrow(
       "Synapse answered 500",
