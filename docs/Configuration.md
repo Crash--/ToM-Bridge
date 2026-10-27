@@ -42,8 +42,13 @@ the message broker. The reference blocks are:
   and the registration file from `registration.example.yaml`.
 * **`synapse`** - retry behaviour for admin operations (e.g.
   `adminRetryMode: 'fallback'`) and optional avatar upload tuning.
-* **`database`** - PostgreSQL connection details (`engine`, `host`, `name`,
-  `user`, `password`, `ssl`, `vacuumDelay`).
+* **`database`** - PostgreSQL connection details (`host`, as `host` or
+  `host:port`, `name`, `user`, `password`, `ssl`, which verifies the server's
+  certificate). The bridge migrates its tables at every start, so the user
+  needs to own the database, or to hold `CREATE` on it (`GRANT CREATE ON
+  DATABASE`) and, before Postgres 18, on the `public` schema. A migration the
+  database refuses is logged as an error; with `spaces`, the bridge then does
+  not start.
 * **`rabbitmq`** - AMQP connection (`host`, `port`, credentials) and the
   topology used to consume/publish settings updates (`queue`, `exchange`,
   `routingKey`). A dead-letter topology is provisioned automatically as
