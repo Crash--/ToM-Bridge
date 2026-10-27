@@ -9,6 +9,7 @@ import {
   DEFAULT_AVATAR_FETCH_TIMEOUT_MS,
   DEFAULT_MAX_AVATAR_BYTES,
   type MatrixApis,
+  type MatrixProfile,
   MatrixProfileUpdater,
 } from "./matrix-profile-updater.js";
 import { MatrixSpaces } from "./matrix-spaces.js";
@@ -87,23 +88,6 @@ function buildAmqpUrl(conf: BridgeConfig["rabbitmq"]): string {
 // =============================================================================
 
 /**
- * Determines whether an update should be applied based on version and timestamp.
- */
-function shouldApplyUpdate(lastSettings: StoredUserSettings | null, newVersion: number, newTimestamp: number): boolean {
-  if (!lastSettings) return true;
-  if (newVersion > lastSettings.version) return true;
-  if (newVersion === lastSettings.version && newTimestamp > lastSettings.timestamp) return true;
-  return false;
-}
-
-/**
- * Checks if an incoming update is an idempotent duplicate based on request ID.
- */
-function isIdempotentDuplicate(lastSettings: StoredUserSettings | null, newRequestId: string): boolean {
-  return lastSettings?.request_id === newRequestId;
-}
-
-/**
  * Formats a Unix timestamp (milliseconds) as an ISO 8601 string.
  */
 export function formatTimestamp(timestamp: number): string {
@@ -112,6 +96,8 @@ export function formatTimestamp(timestamp: number): string {
 
 const PURGE_INTERVAL_MS = 60 * 60 * 1000;
 const SPACE_EVENTS_AT_ONCE = 4;
+// Each round means yet another update of the same user was saved meanwhile
+const RECONCILE_ROUNDS = 5;
 
 Logger.configure({
   console: (process.env.LOG_LEVEL as "info" | "debug" | "warn" | "error" | "trace" | "off" | undefined) || "info",
@@ -175,7 +161,7 @@ export class CommonSettingsBridge {
 
     const tables: Record<UserSettingsTableName, string> = {
       usersettings:
-        "matrix_id varchar(255) PRIMARY KEY, settings jsonb, version int DEFAULT 1, timestamp bigint DEFAULT 0, request_id varchar(255) DEFAULT ''",
+        "matrix_id varchar(255) PRIMARY KEY, settings jsonb, version int DEFAULT 1, timestamp bigint DEFAULT 0, request_id varchar(255) DEFAULT '', avatar_source text, avatar_mxc text",
       spaceclock: "clock_key varchar(255) PRIMARY KEY, timestamp bigint",
       spaces:
         "space_id varchar(255) PRIMARY KEY, organization_id varchar(255), room_id varchar(255), timestamp bigint, delete_at bigint DEFAULT 0",
@@ -288,48 +274,17 @@ export class CommonSettingsBridge {
     /* Degraded mode - no database available */
     if (!this.#isDatabaseAvailable) {
       this.#log.debug(`Degraded mode: applying update for ${userId} without idempotency checks`);
-      await this.#profileUpdater.processChanges(userId, null, payload);
+      await this.#profileUpdater.processChanges(userId, payload);
       this.#log.info(`Successfully processed settings for user: ${userId} (degraded mode)`);
       return;
     }
 
-    // Track whether profile has been updated to avoid double-processing
-    let profileUpdated = false;
-    let lastSettings: StoredUserSettings | null = null;
-
-    // Try to get settings from database (with error handling)
+    let saved: boolean;
     try {
-      lastSettings = await this.#settingsRepository.getUserSettings(userId);
-
-      // Idempotency check
-      if (isIdempotentDuplicate(lastSettings, requestId)) {
-        this.#log.warn(`Duplicate message detected for ${userId} (request_id=${requestId}), discarding`);
-        return;
-      }
-
-      // Determine if we should apply this update
-      const shouldApply = shouldApplyUpdate(lastSettings, version, timestamp);
-
-      if (!shouldApply) {
-        this.#log.warn(
-          `Stale update for ${userId}, discarding (current: version=${lastSettings?.version}, timestamp=${
-            lastSettings ? formatTimestamp(lastSettings.timestamp) : "N/A"
-          }; new: version=${version}, timestamp=${formatTimestamp(timestamp)})`,
-        );
-        return;
-      }
-
-      this.#log.debug(
-        `Applying update for ${userId} (${
-          lastSettings
-            ? `old version=${lastSettings.version}, timestamp=${formatTimestamp(lastSettings.timestamp)}`
-            : "new user"
-        } -> new version=${version}, timestamp=${formatTimestamp(timestamp)})`,
-      );
+      saved = await this.#settingsRepository.saveIfNewer(userId, payload, version, timestamp, requestId);
     } catch (error) {
-      // Database error during read/check - switch to degraded mode
       const errorMsg = error instanceof Error ? error.message : String(error);
-      this.#log.error(`Database error while reading ${userId}: ${errorMsg}`);
+      this.#log.error(`Database error while saving ${userId}: ${errorMsg}`);
 
       // Switch to degraded mode for future messages
       this.#isDatabaseAvailable = false;
@@ -338,39 +293,52 @@ export class CommonSettingsBridge {
       this.#log.warn("Future messages will bypass idempotency checks");
       this.#log.warn("==========================================");
 
-      // Continue processing in degraded mode (no idempotency check)
       this.#log.info(`Processing ${userId} in degraded mode (no idempotency check)`);
+      await this.#profileUpdater.processChanges(userId, payload);
+      return;
     }
 
-    // Process settings changes and update Matrix profile
-    // (This is outside try/catch so errors propagate normally)
-    await this.#profileUpdater.processChanges(userId, lastSettings?.payload ?? null, payload);
-    profileUpdated = true;
-
+    const latest = await this.#settingsRepository.getUserSettings(userId);
+    if (!saved) {
+      this.#log.warn(
+        latest?.request_id === requestId
+          ? `Duplicate message for ${userId} (request_id=${requestId}), reconciling its Matrix profile`
+          : `Stale update for ${userId} (stored: version=${latest?.version}, timestamp=${
+              latest ? formatTimestamp(latest.timestamp) : "N/A"
+            }; new: version=${version}, timestamp=${formatTimestamp(timestamp)}), reconciling its Matrix profile`,
+      );
+    }
+    await this.#reconcile(userId, latest);
     this.#log.info(`Successfully processed settings for user: ${userId}`);
+  }
 
-    // Save settings to database (if still available)
-    if (this.#isDatabaseAvailable && profileUpdated) {
-      try {
-        const isNewUser = lastSettings === null;
-        // Merge new payload with previous settings to preserve unchanged fields
-        const mergedPayload: ISettingsPayload = {
-          ...(lastSettings?.payload ?? {}),
-          ...payload,
-        };
-        await this.#settingsRepository.saveSettings(userId, mergedPayload, version, timestamp, requestId, isNewUser);
-      } catch (error) {
-        // DB save failed but profile was updated - log and continue in degraded mode
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        this.#log.error(`Database save error for ${userId}: ${errorMsg}`);
-        this.#isDatabaseAvailable = false;
-        this.#log.warn("==========================================");
-        this.#log.warn("DATABASE SAVE ERROR - Switching to degraded mode");
-        this.#log.warn("Future messages will bypass idempotency checks");
-        this.#log.warn("==========================================");
-        this.#log.info(`Settings for ${userId} applied to Matrix but not saved to database`);
+  /**
+   * Makes the Matrix profile show the latest settings in the database, the
+   * source of truth, whatever became of the message: a failed or late write
+   * to Matrix, a crash or a concurrent update may have left it behind them.
+   * Writes only what the profile shows otherwise, then reads the settings
+   * again until no update was saved meanwhile. Any error fails the message,
+   * which is retried.
+   */
+  async #reconcile(userId: string, first: StoredUserSettings | null): Promise<void> {
+    let latest = first;
+    for (let round = 0; round < RECONCILE_ROUNDS; round++) {
+      if (!latest) {
+        return;
       }
+      const uploaded = await this.#profileUpdater.reconcile(userId, latest.payload, latest.avatar ?? null);
+      if (uploaded) {
+        await this.#settingsRepository.saveAvatar(userId, uploaded.source, uploaded.mxc);
+      }
+      const after = await this.#settingsRepository.getUserSettings(userId);
+      if (after?.version === latest.version && after.timestamp === latest.timestamp) {
+        return;
+      }
+      latest = after;
     }
+    this.#log.warn(
+      `Settings of ${userId} changed during each of ${RECONCILE_ROUNDS} reconciliations, its Matrix profile may still be behind them`,
+    );
   }
 
   /**
@@ -399,6 +367,8 @@ export class CommonSettingsBridge {
       botUploadContent: async (content: Buffer, contentType: string, fileName?: string) => {
         return await this.#botIntent.matrixClient.uploadContent(content, contentType, fileName);
       },
+      // As the bot, already registered: an intent of the user would register it first, which a namespace may refuse
+      getProfile: (userId: string): Promise<MatrixProfile> => this.#botIntent.getProfileInfo(userId, undefined, false),
     };
   }
 
@@ -647,6 +617,16 @@ export class CommonSettingsBridge {
             name: "request_id",
             type: "varchar(255)",
             default: "",
+          },
+          {
+            name: "avatar_source",
+            type: "text",
+            default: null,
+          },
+          {
+            name: "avatar_mxc",
+            type: "text",
+            default: null,
           },
         ]);
         this.#log.info("Database schema verified");

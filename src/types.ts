@@ -63,6 +63,14 @@ export interface StoredUserSettings {
   readonly timestamp: number;
   readonly version: number;
   readonly payload: ISettingsPayload;
+  /** The avatar last uploaded to Matrix. */
+  readonly avatar?: AvatarUpload;
+}
+
+/** An avatar URL and the mxc URL its upload became. */
+export interface AvatarUpload {
+  readonly source: string;
+  readonly mxc: string;
 }
 
 /**

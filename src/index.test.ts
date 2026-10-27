@@ -33,11 +33,13 @@ const mockSetAvatarUrl = vi.fn(() => Promise.resolve());
 const mockEnsureRegistered = vi.fn(() => Promise.resolve());
 const mockIsSelfAdmin = vi.fn(() => Promise.resolve(true));
 const mockUpsertUser = vi.fn(() => Promise.resolve());
+const mockGetProfileInfo = vi.fn(() => Promise.resolve({}));
 
 const mockIntent = {
   ensureRegistered: mockEnsureRegistered,
   setDisplayName: mockSetDisplayName,
   setAvatarUrl: mockSetAvatarUrl,
+  getProfileInfo: mockGetProfileInfo,
   matrixClient: {
     uploadContentFromUrl: mockUploadContentFromUrl,
     uploadContent: mockUploadContent,
@@ -62,16 +64,42 @@ const mockBridge = {
   getIntent: mockGetIntent,
 };
 
-const mockDbGet = vi.fn().mockResolvedValue([] as unknown[]);
-const mockDbInsert = vi.fn(() => Promise.resolve());
-const mockDbUpdate = vi.fn(() => Promise.resolve());
+// The usersettings row, as the database keeps it
+let storedRow: Record<string, unknown> | null = null;
+const mockDbGet = vi.fn(() =>
+  Promise.resolve(
+    storedRow
+      ? [
+          storedRow,
+        ]
+      : [],
+  ),
+);
+const mockDbUpsertIfNewer = vi.fn((_table: string, values: Record<string, string | number>) => {
+  storedRow = {
+    ...storedRow,
+    ...values,
+  };
+  return Promise.resolve([
+    {
+      matrix_id: values.matrix_id,
+    },
+  ]);
+});
+const mockDbUpdate = vi.fn((_table: string, values: Record<string, string>) => {
+  storedRow = {
+    ...storedRow,
+    ...values,
+  };
+  return Promise.resolve([]);
+});
 const mockDbClose = vi.fn();
 const mockDbEnsureColumns = vi.fn(() => Promise.resolve());
 
 const mockDb = {
   ready: Promise.resolve(),
   get: mockDbGet,
-  insert: mockDbInsert,
+  upsertIfNewer: mockDbUpsertIfNewer,
   update: mockDbUpdate,
   close: mockDbClose,
   ensureColumns: mockDbEnsureColumns,
@@ -124,7 +152,8 @@ const createMockFetchResponse = (options: { ok?: boolean; status?: number; statu
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockDbGet.mockResolvedValue([] as unknown[]);
+  storedRow = null;
+  mockGetProfileInfo.mockResolvedValue({});
   mockUploadContentFromUrl.mockResolvedValue("mxc://example.com/uploaded123");
   mockUploadContent.mockResolvedValue("mxc://example.com/uploaded123");
   // Mock global fetch for avatar downloads
@@ -191,11 +220,16 @@ describe("CommonSettingsBridge - Message Parsing", () => {
 
     await messageHandler(createTestMessage());
 
-    expect(mockDbInsert).toHaveBeenCalledWith(
+    expect(mockDbUpsertIfNewer).toHaveBeenCalledWith(
       "usersettings",
       expect.objectContaining({
         matrix_id: "@user:example.com",
       }),
+      "matrix_id",
+      [
+        "version",
+        "timestamp",
+      ],
     );
   });
 
@@ -213,7 +247,7 @@ describe("CommonSettingsBridge - Message Parsing", () => {
     });
 
     await expect(messageHandler(testMessage)).resolves.toBeUndefined();
-    expect(mockDbInsert).not.toHaveBeenCalled();
+    expect(mockDbUpsertIfNewer).not.toHaveBeenCalled();
   });
 });
 
@@ -366,26 +400,15 @@ describe("CommonSettingsBridge - Matrix Updates", () => {
 });
 
 describe("CommonSettingsBridge - Change Detection", () => {
-  it("should not update display name when unchanged", async () => {
+  it("should not write what the Matrix profile already shows", async () => {
     const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
-    const existingSettings = {
-      matrix_id: "@user:example.com",
-      settings: {
-        matrix_id: "@user:example.com",
-        display_name: "Test User",
-        avatar: "mxc://example.com/avatar123",
-      },
-      version: 1,
-      timestamp: Date.now() - 1000,
-      request_id: "old-request",
-    };
-
-    mockDbGet.mockResolvedValue([
-      existingSettings,
-    ] as unknown[]);
+    mockGetProfileInfo.mockResolvedValue({
+      displayname: "Test User",
+      avatar_url: "mxc://example.com/avatar123",
+    });
 
     await bridge.start();
 
@@ -396,26 +419,15 @@ describe("CommonSettingsBridge - Change Detection", () => {
     expect(mockSetAvatarUrl).not.toHaveBeenCalled();
   });
 
-  it("should update display name when changed", async () => {
+  it("should write a display name the Matrix profile does not show", async () => {
     const { CommonSettingsBridge } = await import("./index.js");
     const config = createTestConfig();
     const bridge = new (CommonSettingsBridge as any)(config);
 
-    const existingSettings = {
-      matrix_id: "@user:example.com",
-      settings: {
-        matrix_id: "@user:example.com",
-        display_name: "Old Name",
-        avatar: "mxc://example.com/avatar123",
-      },
-      version: 1,
-      timestamp: Date.now() - 1000,
-      request_id: "old-request",
-    };
-
-    mockDbGet.mockResolvedValue([
-      existingSettings,
-    ] as unknown[]);
+    mockGetProfileInfo.mockResolvedValue({
+      displayname: "Old Name",
+      avatar_url: "mxc://example.com/avatar123",
+    });
 
     await bridge.start();
 

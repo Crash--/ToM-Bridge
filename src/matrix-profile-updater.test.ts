@@ -30,6 +30,7 @@ describe("MatrixProfileUpdater", () => {
       getIntent: vi.fn().mockReturnValue(mockIntent),
       adminUpsertUser: vi.fn(),
       botUploadContent: vi.fn().mockResolvedValue("mxc://example.com/bot-uploaded"),
+      getProfile: vi.fn().mockResolvedValue({}),
     };
 
     // Create mock logger
@@ -568,174 +569,152 @@ describe("MatrixProfileUpdater", () => {
       ...overrides,
     });
 
-    describe("display name changes", () => {
-      it("should update display name when changed", async () => {
-        const oldPayload = createPayload({
-          display_name: "Old Name",
-        });
-        const newPayload = createPayload({
-          display_name: "New Name",
-        });
-
-        await updater.processChanges("@user:example.com", oldPayload, newPayload);
-
-        expect(mockIntent.setDisplayName).toHaveBeenCalledWith("New Name");
-        expect(mockIntent.setAvatarUrl).not.toHaveBeenCalled();
-      });
-
-      it("should not update display name when unchanged", async () => {
-        const oldPayload = createPayload({
-          display_name: "Same Name",
-        });
-        const newPayload = createPayload({
-          display_name: "Same Name",
-        });
-
-        await updater.processChanges("@user:example.com", oldPayload, newPayload);
-
-        expect(mockIntent.setDisplayName).not.toHaveBeenCalled();
-        expect(mockLogger.debug).toHaveBeenCalledWith("No profile changes detected for @user:example.com");
-      });
-
-      it("should skip update when new display name is empty", async () => {
-        const oldPayload = createPayload({
-          display_name: "Old Name",
-        });
-        const newPayload = createPayload({
-          display_name: "",
-        });
-
-        await updater.processChanges("@user:example.com", oldPayload, newPayload);
-
-        expect(mockIntent.setDisplayName).not.toHaveBeenCalled();
-        expect(mockLogger.warn).toHaveBeenCalledWith(
-          "Display name changed but new value is empty for @user:example.com",
-        );
-      });
-    });
-
-    describe("avatar changes", () => {
-      it("should update avatar when changed", async () => {
-        const oldPayload = createPayload({
-          avatar: "mxc://example.com/old",
-        });
-        const newPayload = createPayload({
-          avatar: "mxc://example.com/new",
-        });
-
-        await updater.processChanges("@user:example.com", oldPayload, newPayload);
-
-        expect(mockIntent.setAvatarUrl).toHaveBeenCalledWith("mxc://example.com/new");
-        expect(mockIntent.setDisplayName).not.toHaveBeenCalled();
-      });
-
-      it("should not update avatar when unchanged", async () => {
-        const oldPayload = createPayload({
-          avatar: "mxc://example.com/same",
-        });
-        const newPayload = createPayload({
-          avatar: "mxc://example.com/same",
-        });
-
-        await updater.processChanges("@user:example.com", oldPayload, newPayload);
-
-        expect(mockIntent.setAvatarUrl).not.toHaveBeenCalled();
-      });
-
-      it("should skip update when new avatar is empty", async () => {
-        const oldPayload = createPayload({
-          avatar: "mxc://example.com/old",
-        });
-        const newPayload = createPayload({
-          avatar: "",
-        });
-
-        await updater.processChanges("@user:example.com", oldPayload, newPayload);
-
-        expect(mockIntent.setAvatarUrl).not.toHaveBeenCalled();
-        expect(mockLogger.warn).toHaveBeenCalledWith("Avatar changed but new value is empty for @user:example.com");
-      });
-    });
-
-    describe("no changes", () => {
-      it("should skip all updates when nothing changed", async () => {
-        const oldPayload = createPayload();
-        const newPayload = createPayload();
-
-        await updater.processChanges("@user:example.com", oldPayload, newPayload);
-
-        expect(mockIntent.setDisplayName).not.toHaveBeenCalled();
-        expect(mockIntent.setAvatarUrl).not.toHaveBeenCalled();
-        expect(mockLogger.debug).toHaveBeenCalledWith("No profile changes detected for @user:example.com");
-      });
-    });
-
-    describe("new user handling", () => {
-      it("should update both display name and avatar for new user", async () => {
-        const newPayload = createPayload({
+    it("should write both display name and avatar", async () => {
+      await updater.processChanges(
+        "@user:example.com",
+        createPayload({
           display_name: "New User",
           avatar: "mxc://example.com/avatar",
-        });
+        }),
+      );
 
-        await updater.processChanges("@user:example.com", null, newPayload);
+      expect(mockIntent.setDisplayName).toHaveBeenCalledWith("New User");
+      expect(mockIntent.setAvatarUrl).toHaveBeenCalledWith("mxc://example.com/avatar");
+    });
 
-        expect(mockIntent.setDisplayName).toHaveBeenCalledWith("New User");
-        expect(mockIntent.setAvatarUrl).toHaveBeenCalledWith("mxc://example.com/avatar");
-      });
-
-      it("should update only display name for new user when avatar empty", async () => {
-        const newPayload = createPayload({
+    it("should write only the display name when the avatar is empty", async () => {
+      await updater.processChanges(
+        "@user:example.com",
+        createPayload({
           display_name: "New User",
           avatar: "",
-        });
+        }),
+      );
 
-        await updater.processChanges("@user:example.com", null, newPayload);
+      expect(mockIntent.setDisplayName).toHaveBeenCalledWith("New User");
+      expect(mockIntent.setAvatarUrl).not.toHaveBeenCalled();
+    });
 
-        expect(mockIntent.setDisplayName).toHaveBeenCalledWith("New User");
-        expect(mockIntent.setAvatarUrl).not.toHaveBeenCalled();
-      });
-
-      it("should update only avatar for new user when display name empty", async () => {
-        const newPayload = createPayload({
+    it("should write only the avatar when the display name is empty", async () => {
+      await updater.processChanges(
+        "@user:example.com",
+        createPayload({
           display_name: "",
           avatar: "mxc://example.com/avatar",
-        });
+        }),
+      );
 
-        await updater.processChanges("@user:example.com", null, newPayload);
+      expect(mockIntent.setDisplayName).not.toHaveBeenCalled();
+      expect(mockIntent.setAvatarUrl).toHaveBeenCalledWith("mxc://example.com/avatar");
+    });
+  });
 
-        expect(mockIntent.setDisplayName).not.toHaveBeenCalled();
-        expect(mockIntent.setAvatarUrl).toHaveBeenCalledWith("mxc://example.com/avatar");
-      });
+  // reconcile: the profile is read from Matrix, the avatar served and uploaded
+  const latest: ISettingsPayload = {
+    matrix_id: "@user:example.com",
+    display_name: "Jane Doe",
+    avatar: "mxc://example.com/jane",
+  };
+  const httpAvatar = "https://workspace.example.com/avatar/jane.png";
+  const reconciler = (): MatrixProfileUpdater => {
+    (global.fetch as unknown as Mock<AnyFn>).mockResolvedValue({
+      ok: true,
+      headers: {
+        get: (header: string) => (header === "content-type" ? "image/png" : null),
+      },
+      arrayBuffer: () => Promise.resolve(Buffer.from("image").buffer),
+    });
+    mockMatrixClient.uploadContent.mockResolvedValue("mxc://example.com/uploaded");
+    return new MatrixProfileUpdater(mockApis, SynapseAdminRetryMode.DISABLED, mockLogger);
+  };
 
-      it("should not update anything for new user when both values empty", async () => {
-        const newPayload = createPayload({
-          display_name: "",
-          avatar: "",
-        });
-
-        await updater.processChanges("@user:example.com", null, newPayload);
-
-        expect(mockIntent.setDisplayName).not.toHaveBeenCalled();
-        expect(mockIntent.setAvatarUrl).not.toHaveBeenCalled();
-      });
+  it("writes what the Matrix profile does not show", async () => {
+    mockApis.getProfile.mockResolvedValue({
+      displayname: "Older Name",
+      avatar_url: "mxc://example.com/older",
     });
 
-    describe("both fields changed", () => {
-      it("should update both display name and avatar when both changed", async () => {
-        const oldPayload = createPayload({
-          display_name: "Old Name",
-          avatar: "mxc://example.com/old",
-        });
-        const newPayload = createPayload({
-          display_name: "New Name",
-          avatar: "mxc://example.com/new",
-        });
+    await reconciler().reconcile("@user:example.com", latest, null);
 
-        await updater.processChanges("@user:example.com", oldPayload, newPayload);
+    expect(mockIntent.setDisplayName).toHaveBeenCalledWith("Jane Doe");
+    expect(mockIntent.setAvatarUrl).toHaveBeenCalledWith("mxc://example.com/jane");
+  });
 
-        expect(mockIntent.setDisplayName).toHaveBeenCalledWith("New Name");
-        expect(mockIntent.setAvatarUrl).toHaveBeenCalledWith("mxc://example.com/new");
-      });
+  it("writes nothing the Matrix profile already shows", async () => {
+    mockApis.getProfile.mockResolvedValue({
+      displayname: "Jane Doe",
+      avatar_url: "mxc://example.com/jane",
     });
+
+    await reconciler().reconcile("@user:example.com", latest, null);
+
+    expect(mockIntent.setDisplayName).not.toHaveBeenCalled();
+    expect(mockIntent.setAvatarUrl).not.toHaveBeenCalled();
+  });
+
+  it("does not download an http avatar again while the profile shows its last upload", async () => {
+    mockApis.getProfile.mockResolvedValue({
+      displayname: "Jane Doe",
+      avatar_url: "mxc://example.com/uploaded",
+    });
+
+    const uploaded = await reconciler().reconcile(
+      "@user:example.com",
+      {
+        ...latest,
+        avatar: httpAvatar,
+      },
+      {
+        source: httpAvatar,
+        mxc: "mxc://example.com/uploaded",
+      },
+    );
+
+    expect(uploaded).toBeNull();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("uploads an http avatar the profile does not show, and returns its mxc URL", async () => {
+    mockApis.getProfile.mockResolvedValue({
+      displayname: "Jane Doe",
+      avatar_url: "mxc://example.com/older",
+    });
+
+    const uploaded = await reconciler().reconcile(
+      "@user:example.com",
+      {
+        ...latest,
+        avatar: httpAvatar,
+      },
+      {
+        source: "https://workspace.example.com/avatar/older.png",
+        mxc: "mxc://example.com/older",
+      },
+    );
+
+    expect(uploaded).toEqual({
+      source: httpAvatar,
+      mxc: "mxc://example.com/uploaded",
+    });
+    expect(mockIntent.setAvatarUrl).toHaveBeenCalledWith("mxc://example.com/uploaded");
+  });
+
+  it("writes the profile of a user Matrix does not know yet", async () => {
+    mockApis.getProfile.mockRejectedValue(
+      Object.assign(new Error("Profile not found"), {
+        errcode: "M_NOT_FOUND",
+      }),
+    );
+
+    await reconciler().reconcile("@user:example.com", latest, null);
+
+    expect(mockIntent.setDisplayName).toHaveBeenCalledWith("Jane Doe");
+  });
+
+  it("fails when the Matrix profile cannot be read, so the message is retried", async () => {
+    mockApis.getProfile.mockRejectedValue(new Error("connect ECONNREFUSED"));
+
+    await expect(reconciler().reconcile("@user:example.com", latest, null)).rejects.toThrow("ECONNREFUSED");
+    expect(mockIntent.setDisplayName).not.toHaveBeenCalled();
   });
 });

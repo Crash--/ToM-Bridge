@@ -22,6 +22,7 @@ export const mockIntent: {
   ensureRegistered: MockFn;
   setDisplayName: MockFn;
   setAvatarUrl: MockFn;
+  getProfileInfo: MockFn;
   matrixClient: {
     adminApis: {
       synapse: {
@@ -36,6 +37,7 @@ export const mockIntent: {
   ensureRegistered: vi.fn<AnyFn>().mockResolvedValue(undefined),
   setDisplayName: vi.fn<AnyFn>().mockResolvedValue(undefined),
   setAvatarUrl: vi.fn<AnyFn>().mockResolvedValue(undefined),
+  getProfileInfo: vi.fn<AnyFn>().mockResolvedValue({}),
   matrixClient: {
     adminApis: {
       synapse: {
