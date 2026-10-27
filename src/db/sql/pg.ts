@@ -228,6 +228,42 @@ class Pg<T extends string> extends SQL<T> implements DbBackend<T> {
     });
   }
 
+  async upsertIfNewer(
+    table: T,
+    values: Record<string, string | number>,
+    key: string,
+    order: string[],
+  ): Promise<DbGetResult> {
+    if (!this.db) {
+      throw new Error("Wait for database to be ready");
+    }
+    const names = Object.keys(values);
+    const query = this.upsertIfNewerQuery(table, names, key, order, (i) => `$${i + 1}`);
+    this.logger.debug(
+      {
+        table,
+        fields: names,
+        query,
+      },
+      "[Pg][upsertIfNewer] Executing",
+    );
+    try {
+      const result = await this.db.query(query, Object.values(values));
+      return result.rows;
+    } catch (error) {
+      this.logger.error(
+        {
+          table,
+          fields: names,
+          query,
+          error,
+        },
+        "[Pg][upsertIfNewer] Failed",
+      );
+      throw error;
+    }
+  }
+
   update(
     table: string,
     values: Record<string, string | number>,

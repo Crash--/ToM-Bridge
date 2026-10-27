@@ -53,6 +53,20 @@ abstract class SQL<T extends string> {
     });
   }
 
+  /** The statement of upsertIfNewer, with `placeholder(i)` for the i-th value. */
+  protected upsertIfNewerQuery(
+    table: T,
+    names: string[],
+    key: string,
+    order: string[],
+    placeholder: (i: number) => string,
+  ): string {
+    const set = names.filter((name) => name !== key).map((name) => `${name} = EXCLUDED.${name}`);
+    const stored = order.map((name) => `${table}.${name}`);
+    const incoming = order.map((name) => `EXCLUDED.${name}`);
+    return `INSERT INTO ${table}(${names.join(",")}) VALUES(${names.map((_name, i) => placeholder(i)).join(",")}) ON CONFLICT (${key}) DO UPDATE SET ${set.join(", ")} WHERE (${stored.join(", ")}) < (${incoming.join(", ")}) RETURNING ${key};`;
+  }
+
   getAll(table: T, fields: string[], order?: string): Promise<DbGetResult> {
     // @ts-expect-error implemented later
     return this.get(table, fields, undefined, order);
