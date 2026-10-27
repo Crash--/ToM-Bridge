@@ -13,8 +13,9 @@
 !tsconfig.json
 !tsconfig.build.json
 
-## Allow source files
+## Allow source files and the migrations the bridge applies at start
 !src/**
+!drizzle/**
 
 ## Ensure test files are not imported
 src/__mocks__/

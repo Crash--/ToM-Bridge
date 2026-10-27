@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { closeDatabase, databaseUrl, openDatabase, withLock } from "./db.js";
 
 const CONFIG = {
-  engine: "pg" as const,
   host: "db.acme.example:5433",
   name: "tom db",
   user: "twake",

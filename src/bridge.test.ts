@@ -1,12 +1,17 @@
+import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
+import { openTestDatabase } from "./__mocks__/pglite.js";
 import {
   AppServiceRegistration,
   Bridge,
   Cli,
   Logger,
-  Database as MockDatabase,
   RabbitMQClient as MockRabbitMQClient,
+  closeDatabase as mockCloseDatabase,
+  migrate as mockMigrate,
+  openDatabase as mockOpenDatabase,
+  withLock as mockWithLock,
 } from "./__mocks__/shared.js";
 import { type MatrixProfile, MatrixProfileUpdater } from "./matrix-profile-updater.js";
 import { SettingsRepository } from "./settings-repository.js";
@@ -104,8 +109,11 @@ vi.mock("@linagora/rabbitmq-client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@linagora/rabbitmq-client")>()),
   RabbitMQClient: MockRabbitMQClient,
 }));
-vi.mock("./db/index.js", () => ({
-  Database: MockDatabase,
+vi.mock("./db.js", () => ({
+  openDatabase: mockOpenDatabase,
+  migrate: mockMigrate,
+  withLock: mockWithLock,
+  closeDatabase: mockCloseDatabase,
 }));
 
 const { CommonSettingsBridge } = await import("./bridge.js");
@@ -115,17 +123,8 @@ describe("CommonSettingsBridge", () => {
   let mockConfig: BridgeConfig;
   let mockBridgeInstance: InstanceType<typeof Bridge>;
   let mockIntent: any;
-  let mockDatabase: {
-    ready: Promise<void>;
-    get: Mock<AnyFn>;
-    insert: Mock<AnyFn>;
-    update: Mock<AnyFn>;
-    getHigherThan: Mock<AnyFn>;
-    deleteEqual: Mock<AnyFn>;
-    close: Mock<AnyFn>;
-    ensureColumns: Mock<AnyFn>;
-    withLock: Mock<AnyFn>;
-  };
+  // The database the bridge queries
+  let client: PGlite;
   let mockClient: {
     init: Mock<AnyFn>;
     subscribe: Mock<AnyFn>;
@@ -137,7 +136,7 @@ describe("CommonSettingsBridge", () => {
   let spyProcessChanges: Mock<AnyFn>;
   let mockAdminApis: any;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
 
     // Setup config
@@ -146,7 +145,6 @@ describe("CommonSettingsBridge", () => {
       domain: "example.com",
       registrationPath: "/path/to/registration.yaml",
       database: {
-        engine: "pg",
         host: "localhost",
         name: "testdb",
         user: "testuser",
@@ -167,27 +165,14 @@ describe("CommonSettingsBridge", () => {
       },
     };
 
-    // Mock database
-    mockDatabase = {
-      ready: Promise.resolve(),
-      get: vi.fn(),
-      insert: vi.fn(),
-      update: vi.fn(),
-      upsertIfNewer: vi.fn().mockResolvedValue([
-        {
-          matrix_id: "@user:example.com",
-        },
-      ]),
-      getHigherThan: vi.fn().mockResolvedValue([]),
-      deleteEqual: vi.fn().mockResolvedValue(undefined),
-      close: vi.fn(),
-      ensureColumns: vi.fn().mockResolvedValue(undefined),
-      withLock: vi.fn((_key: string, fn: () => Promise<unknown>) => fn()),
-    } as any;
-    // biome-ignore lint/complexity/useArrowFunction: called with new, which vitest refuses on an arrow function
-    MockDatabase.mockImplementation(function () {
-      return mockDatabase;
+    const database = await openTestDatabase();
+    client = database.client;
+    mockOpenDatabase.mockReturnValue({
+      db: database.db,
     });
+    mockMigrate.mockResolvedValue(undefined);
+    mockWithLock.mockImplementation((_database: unknown, _key: string, fn: () => Promise<unknown>) => fn());
+    mockCloseDatabase.mockResolvedValue(undefined);
 
     // Mock RabbitMQ client
     mockClient = {
@@ -269,19 +254,7 @@ describe("CommonSettingsBridge", () => {
       bridge = new CommonSettingsBridge(mockConfig);
 
       expect(bridge).toBeInstanceOf(CommonSettingsBridge);
-      expect(MockDatabase).toHaveBeenCalledWith(
-        expect.objectContaining({
-          database_engine: "pg",
-          database_host: "localhost",
-          database_name: "testdb",
-          database_user: "testuser",
-          database_password: "testpass",
-        }),
-        expect.any(Object),
-        expect.objectContaining({
-          usersettings: expect.any(String),
-        }),
-      );
+      expect(mockOpenDatabase).toHaveBeenCalledWith(mockConfig.database, expect.any(Object));
     });
 
     it("should initialize RabbitMQ client with URL built from config", () => {
@@ -320,20 +293,47 @@ describe("CommonSettingsBridge", () => {
       expect(mockAdminApis.isSelfAdmin).toHaveBeenCalled();
     });
 
-    it("should wait for database to be ready", async () => {
-      const readyPromise = Promise.resolve();
-      mockDatabase.ready = readyPromise;
+    it("should migrate the database before handling messages", async () => {
+      await bridge.start();
+
+      expect(mockMigrate.mock.invocationCallOrder[0]).toBeLessThan(mockClient.subscribe.mock.invocationCallOrder[0]!);
+    });
+
+    it("logs an error and runs in degraded mode when the database refuses the migration", async () => {
+      mockMigrate.mockRejectedValueOnce(
+        Object.assign(new Error("permission denied for database tom_db"), {
+          name: "PostgresError",
+          code: "42501",
+        }),
+      );
 
       await bridge.start();
 
-      await expect(readyPromise).resolves.toBeUndefined();
+      const log = Logger.mock.results.at(-1)!.value;
+      expect(log.error).toHaveBeenCalledWith(
+        expect.stringContaining("DATABASE MIGRATION FAILED: permission denied for database tom_db"),
+      );
+      expect(log.warn).toHaveBeenCalledWith("DATABASE NOT MIGRATED - Running in degraded mode");
+    });
+
+    it("runs in degraded mode without an error when the database does not answer", async () => {
+      mockMigrate.mockRejectedValueOnce(
+        Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:5432"), {
+          code: "ECONNREFUSED",
+        }),
+      );
+
+      await bridge.start();
+
+      const log = Logger.mock.results.at(-1)!.value;
+      expect(log.error).not.toHaveBeenCalled();
+      expect(log.warn).toHaveBeenCalledWith("DATABASE UNAVAILABLE - Running in degraded mode");
     });
 
     it("should initialize settings repository", async () => {
       await bridge.start();
 
       const handleMessageFn = (mockClient.subscribe as Mock<AnyFn>).mock.calls[0]![3];
-      mockDatabase.get.mockResolvedValue([]);
       await handleMessageFn({
         source: "test-app",
         nickname: "@user:example.com",
@@ -345,40 +345,17 @@ describe("CommonSettingsBridge", () => {
         },
       });
 
-      expect(mockDatabase.get).toHaveBeenCalledWith(
-        "usersettings",
-        [
-          "matrix_id",
-          "settings",
-          "version",
-          "timestamp",
-          "request_id",
-          "avatar_source",
-          "avatar_mxc",
-        ],
+      expect((await client.query("SELECT matrix_id FROM usersettings")).rows).toEqual([
         {
           matrix_id: "@user:example.com",
         },
-      );
+      ]);
     });
 
     it("should initialize profile updater with fallback retry mode", async () => {
       await bridge.start();
 
       const handleMessageFn = (mockClient.subscribe as Mock<AnyFn>).mock.calls[0]![3];
-      // The row once the update is saved
-      mockDatabase.get.mockResolvedValue([
-        {
-          matrix_id: "@user:example.com",
-          settings: JSON.stringify({
-            matrix_id: "@user:example.com",
-            display_name: "New Name",
-          }),
-          version: 2,
-          timestamp: Date.now(),
-          request_id: "req-2",
-        },
-      ]);
       mockIntent.setDisplayName.mockRejectedValueOnce({
         errcode: "M_FORBIDDEN",
         message: "Forbidden",
@@ -548,9 +525,6 @@ describe("CommonSettingsBridge", () => {
           sendStateEvent: vi.fn().mockResolvedValue("$event"),
           getRoomMembers: vi.fn().mockResolvedValue([]),
         });
-        mockDatabase.get.mockResolvedValue([]);
-        mockDatabase.update.mockResolvedValue([]);
-        mockDatabase.insert.mockResolvedValue([]);
       });
 
       const startWithSpaces = async (): Promise<
@@ -603,32 +577,36 @@ describe("CommonSettingsBridge", () => {
       });
 
       it("does not start without the database", async () => {
-        mockDatabase.ready = Promise.reject(new Error("connection refused"));
+        mockMigrate.mockRejectedValue(new Error("connection refused"));
 
         await expect(
           new CommonSettingsBridge({
             ...mockConfig,
             spaces,
           }).start(),
-        ).rejects.toThrow("Spaces need the database: connection refused");
+        ).rejects.toThrow("Spaces need the database, the bridge does not start without it: connection refused");
       });
 
       it("fails an event the database cannot check, so it is retried, and keeps the settings going", async () => {
         const handler = await startWithSpaces();
-        mockDatabase.get.mockRejectedValue(new Error("connection terminated"));
+        await client.close();
 
         await expect(
           handler(created, {
             routingKey: "twake.space.created.acme",
             headers: {},
           }),
-        ).rejects.toThrow("connection terminated");
+        ).rejects.toMatchObject({
+          cause: {
+            message: "PGlite is closed",
+          },
+        });
         expect(mockClient.publish).not.toHaveBeenCalled();
       });
 
       it("applies an event under the lock of its space, shared by the pods", async () => {
         const handler = await startWithSpaces();
-        mockDatabase.withLock.mockImplementation((_key: string, fn: () => Promise<unknown>) => {
+        mockWithLock.mockImplementation((_database: unknown, _key: string, fn: () => Promise<unknown>) => {
           expect(mockClient.publish).not.toHaveBeenCalled();
           return fn();
         });
@@ -638,13 +616,13 @@ describe("CommonSettingsBridge", () => {
           headers: {},
         });
 
-        expect(mockDatabase.withLock).toHaveBeenCalledWith("3b9e2c71", expect.any(Function));
+        expect(mockWithLock).toHaveBeenCalledWith(expect.anything(), "3b9e2c71", expect.any(Function));
         expect(mockClient.publish).toHaveBeenCalledTimes(1);
       });
 
       it("fails an event whose space the database cannot lock, so it is retried", async () => {
         const handler = await startWithSpaces();
-        mockDatabase.withLock.mockRejectedValue(new Error("canceling statement due to lock timeout"));
+        mockWithLock.mockRejectedValue(new Error("canceling statement due to lock timeout"));
 
         await expect(
           handler(created, {
@@ -688,7 +666,7 @@ describe("CommonSettingsBridge", () => {
           },
         );
 
-        expect(mockDatabase.insert).toHaveBeenCalledWith("spaceclock", {
+        expect((await client.query("SELECT clock_key, timestamp FROM spaceclock")).rows).toContainEqual({
           clock_key: "3b9e2c71/@jdoe:example.com",
           timestamp: Date.parse(created.timestamp),
         });
@@ -701,25 +679,21 @@ describe("CommonSettingsBridge", () => {
           headers: {},
         });
 
-        expect(mockDatabase.insert).toHaveBeenCalledWith("spaces", {
-          space_id: "3b9e2c71",
-          organization_id: "acme",
-          room_id: "!space:example.com",
-          timestamp: Date.parse(created.timestamp),
-          delete_at: expect.any(Number),
-        });
+        expect((await client.query("SELECT * FROM spaces")).rows).toEqual([
+          {
+            space_id: "3b9e2c71",
+            organization_id: "acme",
+            room_id: "!space:example.com",
+            timestamp: Date.parse(created.timestamp),
+            delete_at: expect.any(Number),
+          },
+        ]);
       });
 
       it("purges the Matrix spaces whose retention is over", async () => {
-        mockDatabase.getHigherThan.mockResolvedValue([
-          {
-            space_id: "gone",
-            organization_id: "acme",
-            room_id: "!gone:example.com",
-            timestamp: 0,
-            delete_at: 1,
-          },
-        ]);
+        await client.query(
+          "INSERT INTO spaces (space_id, organization_id, room_id, timestamp, delete_at) VALUES ('gone', 'acme', '!gone:example.com', 0, 1)",
+        );
 
         await startWithSpaces();
         await new Promise((resolve) => setTimeout(resolve, 0));
@@ -732,7 +706,7 @@ describe("CommonSettingsBridge", () => {
             purge: true,
           },
         );
-        expect(mockDatabase.deleteEqual).toHaveBeenCalledWith("spaces", "space_id", "gone");
+        expect((await client.query("SELECT space_id FROM spaces")).rows).toEqual([]);
       });
 
       it("requests a sync of its organization once subscribed, while it knows no space", async () => {
@@ -807,7 +781,7 @@ describe("CommonSettingsBridge", () => {
     it("should close database connection", async () => {
       await bridge.stop();
 
-      expect(mockDatabase.close).toHaveBeenCalled();
+      expect(mockCloseDatabase).toHaveBeenCalled();
     });
 
     it("should handle shutdown errors", async () => {
@@ -823,7 +797,7 @@ describe("CommonSettingsBridge", () => {
       await expect(bridge.stop()).rejects.toThrow("drain timeout");
 
       expect(mockClient.close).toHaveBeenCalled();
-      expect(mockDatabase.close).toHaveBeenCalled();
+      expect(mockCloseDatabase).toHaveBeenCalled();
     });
   });
 

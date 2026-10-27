@@ -1,7 +1,9 @@
+import { eq, sql } from "drizzle-orm";
 import type { Logger } from "matrix-appservice-bridge";
 
-import type { Database, DbGetResult } from "./db/index.js";
-import type { ISettingsPayload, StoredUserSettings, UserSettingsTableName } from "./types.js";
+import type { Queries } from "./db.js";
+import { usersettings } from "./schema.js";
+import type { ISettingsPayload, StoredUserSettings } from "./types.js";
 
 /**
  * Formats a Unix timestamp (milliseconds) as an ISO 8601 string.
@@ -183,7 +185,7 @@ export class SettingsPayload implements ISettingsPayload {
  * including JSON serialization/deserialization and error handling.
  */
 export class SettingsRepository {
-  readonly #db: Database<UserSettingsTableName>;
+  readonly #db: Queries;
   readonly #logger: Logger;
 
   /**
@@ -191,7 +193,7 @@ export class SettingsRepository {
    * @param db - Database instance for user settings operations
    * @param logger - Logger instance for diagnostic output
    */
-  constructor(db: Database<UserSettingsTableName>, logger: Logger) {
+  constructor(db: Queries, logger: Logger) {
     this.#db = db;
     this.#logger = logger;
   }
@@ -208,28 +210,13 @@ export class SettingsRepository {
     this.#logger.debug(`Looking up user settings for ${userId}`);
 
     try {
-      const result: DbGetResult = await this.#db.get(
-        "usersettings",
-        [
-          "matrix_id",
-          "settings",
-          "version",
-          "timestamp",
-          "request_id",
-          "avatar_source",
-          "avatar_mxc",
-        ],
-        {
-          matrix_id: userId,
-        },
-      );
+      const [dbRow] = await this.#db.select().from(usersettings).where(eq(usersettings.matrix_id, userId));
 
-      if (result.length === 0) {
+      if (!dbRow) {
         this.#logger.debug(`No existing settings found for ${userId}`);
         return null;
       }
 
-      const dbRow: Record<string, unknown> = result[0]!;
       const settingsRaw = typeof dbRow.settings === "string" ? dbRow.settings : JSON.stringify(dbRow.settings);
       const parsedSettings = this.#safeParsePayload(settingsRaw);
 
@@ -250,16 +237,16 @@ export class SettingsRepository {
       );
 
       return {
-        nickname: dbRow.matrix_id as string,
+        nickname: dbRow.matrix_id,
         payload: parsedSettings,
-        version: dbRow.version as number,
+        version: dbRow.version ?? 1,
         timestamp: validTimestamp,
-        request_id: dbRow.request_id as string,
+        request_id: dbRow.request_id ?? "",
         ...(dbRow.avatar_source && dbRow.avatar_mxc
           ? {
               avatar: {
-                source: String(dbRow.avatar_source),
-                mxc: String(dbRow.avatar_mxc),
+                source: dbRow.avatar_source,
+                mxc: dbRow.avatar_mxc,
               },
             }
           : {}),
@@ -293,21 +280,29 @@ export class SettingsRepository {
     requestId: string,
   ): Promise<boolean> {
     try {
-      const written = await this.#db.upsertIfNewer(
-        "usersettings",
-        {
+      // The avatar columns stay out of the update: they describe the last upload, not these settings
+      const written = await this.#db
+        .insert(usersettings)
+        .values({
           matrix_id: userId,
-          settings: JSON.stringify(payload),
+          settings: payload,
           version,
           timestamp,
           request_id: requestId,
-        },
-        "matrix_id",
-        [
-          "version",
-          "timestamp",
-        ],
-      );
+        })
+        .onConflictDoUpdate({
+          target: usersettings.matrix_id,
+          set: {
+            settings: sql`excluded.settings`,
+            version: sql`excluded.version`,
+            timestamp: sql`excluded.timestamp`,
+            request_id: sql`excluded.request_id`,
+          },
+          setWhere: sql`(${usersettings.version}, ${usersettings.timestamp}) < (excluded.version, excluded.timestamp)`,
+        })
+        .returning({
+          matrixId: usersettings.matrix_id,
+        });
       this.#logger.debug(
         `${written.length > 0 ? "Saved" : "Kept the newer stored"} settings for ${userId}: version=${version}, timestamp=${timestamp}, request_id=${requestId}`,
       );
@@ -326,22 +321,19 @@ export class SettingsRepository {
    * Whatever the version stored, as it describes the upload, not the settings.
    */
   async saveAvatar(userId: string, source: string, mxc: string): Promise<void> {
-    await this.#db.update(
-      "usersettings",
-      {
+    await this.#db
+      .update(usersettings)
+      .set({
         avatar_source: source,
         avatar_mxc: mxc,
-      },
-      "matrix_id",
-      userId,
-    );
+      })
+      .where(eq(usersettings.matrix_id, userId));
   }
 
   /**
-   * Parses a settings payload from database result.
-   * Handles both JSON strings (sqlite) and objects (PostgreSQL jsonb).
+   * Parses a settings payload from database result, validating its fields.
    *
-   * @param raw - The raw value from database (string or object)
+   * @param raw - The settings as JSON
    * @returns The parsed ISettingsPayload or null if parsing failed
    */
   #safeParsePayload(raw: string): ISettingsPayload | null {
