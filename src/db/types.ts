@@ -47,6 +47,18 @@ export interface ColumnInfo {
 
 type Insert<T> = (table: T, values: Record<string, string | number>) => Promise<DbGetResult>;
 
+/**
+ * Inserts the row, or replaces the one with the same `key` when its `order`
+ * columns compare lower, in one statement. Returns the key of the row written,
+ * none when the stored row is as recent or more.
+ */
+type UpsertIfNewer<T> = (
+  table: T,
+  values: Record<string, string | number>,
+  key: string,
+  order: string[],
+) => Promise<DbGetResult>;
+
 type Update<T> = (
   table: T,
   values: Record<string, string | number>,
@@ -162,6 +174,7 @@ export interface DbBackend<T extends string> {
   ready: Promise<void>;
   createDatabases: CreateDatabases<T>;
   insert: Insert<T>;
+  upsertIfNewer: UpsertIfNewer<T>;
   get: Get<T>;
   getJoin: GetJoin<T>;
   getWhereEqualOrDifferent: Get2<T>;

@@ -62,6 +62,10 @@ class Database<T extends string> implements DbBackend<T> {
     return this.db.insert(table, values);
   }
 
+  upsertIfNewer(table: T, values: Record<string, string | number>, key: string, order: string[]): Promise<DbGetResult> {
+    return this.db.upsertIfNewer(table, values, key, order);
+  }
+
   update(
     table: T,
     values: Record<string, string | number>,

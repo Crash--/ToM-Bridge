@@ -152,6 +152,41 @@ class SQLite<T extends string> extends SQL<T> implements DbBackend<T> {
     });
   }
 
+  upsertIfNewer(table: T, values: Record<string, string | number>, key: string, order: string[]): Promise<DbGetResult> {
+    return new Promise((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error("Wait for database to be ready"));
+        return;
+      }
+      const names = Object.keys(values);
+      const query = this.upsertIfNewerQuery(table, names, key, order, () => "?");
+      this.logger.debug(
+        {
+          table,
+          fields: names,
+          query,
+        },
+        "[SQLite][upsertIfNewer] Executing",
+      );
+      this.db.all(query, Object.values(values), (err: Error | null, rows: Array<Record<string, string | number>>) => {
+        if (err) {
+          this.logger.error(
+            {
+              table,
+              fields: names,
+              query,
+              error: err,
+            },
+            "[SQLite][upsertIfNewer] Failed",
+          );
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
   update(
     table: T,
     values: Record<string, string | number>,
