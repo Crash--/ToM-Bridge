@@ -16,12 +16,12 @@ jobs:
       shfmt: ${{ steps.filter.outputs.shfmt }}
       yamllint: ${{ steps.filter.outputs.yamllint }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 100
           persist-credentials: false
 
-      - uses: dorny/paths-filter@v4
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         id: filter
         with:
           filters: |
@@ -40,13 +40,13 @@ jobs:
   # convco:
   #   runs-on: ubuntu-latest
   #   steps:
-  #     - uses: actions/checkout@v7
+  #     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
   #       with:
   #         fetch-depth: 100
   #         persist-credentials: false
   #
   #     - name: Install convco
-  #       uses: convco/convco-action@0.3.0
+  #       uses: convco/convco-action@f61344a725ce779cd2c8977a24ac4704deed3d12  # v0.3.0
   #
   #     - name: Run convco
   #       run: convco check ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
@@ -57,12 +57,12 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
       - name: Setup Biome
-        uses: biomejs/setup-biome@v2
+        uses: biomejs/setup-biome@4c91541eaada48f67d7dbd7833600ce162b68f51  # v2.7.1
         with:
           version: "2.5.8"
 
@@ -74,7 +74,7 @@ jobs:
     if: needs.detect-changes.outputs.markdownlint == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -87,11 +87,11 @@ jobs:
     if: needs.detect-changes.outputs.nixfmt == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: nixbuild/nix-quick-install-action@v28
+      - uses: nixbuild/nix-quick-install-action@60e9c39264d4714139af3cdf15f691b19eec3530  # v28
 
       - run: nix run nixpkgs#nixfmt-rfc-style -- --check $(find . -name "*.nix")
 
@@ -100,7 +100,7 @@ jobs:
     if: needs.detect-changes.outputs.shfmt == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -113,7 +113,7 @@ jobs:
     if: needs.detect-changes.outputs.yamllint == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
