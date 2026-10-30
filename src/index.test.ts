@@ -1,13 +1,18 @@
 /* eslint-disable @typescript-eslint/promise-function-async */
+import type { PGlite } from "@electric-sql/pglite";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { openTestDatabase } from "./__mocks__/pglite.js";
 import {
   AppServiceRegistration,
   Bridge as MockBridge,
   Cli as MockCli,
-  Database as MockDatabase,
   Logger as MockLogger,
   RabbitMQClient as MockRabbitMQClient,
+  closeDatabase as mockCloseDatabase,
+  migrate as mockMigrate,
+  openDatabase as mockOpenDatabase,
+  withLock as mockWithLock,
 } from "./__mocks__/shared.js";
 import type { BridgeConfig } from "./types.js";
 
@@ -22,8 +27,11 @@ vi.mock("@linagora/rabbitmq-client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@linagora/rabbitmq-client")>()),
   RabbitMQClient: MockRabbitMQClient,
 }));
-vi.mock("./db/index.js", () => ({
-  Database: MockDatabase,
+vi.mock("./db.js", () => ({
+  openDatabase: mockOpenDatabase,
+  migrate: mockMigrate,
+  withLock: mockWithLock,
+  closeDatabase: mockCloseDatabase,
 }));
 
 const mockUploadContentFromUrl = vi.fn(() => Promise.resolve("mxc://example.com/uploaded123"));
@@ -64,46 +72,8 @@ const mockBridge = {
   getIntent: mockGetIntent,
 };
 
-// The usersettings row, as the database keeps it
-let storedRow: Record<string, unknown> | null = null;
-const mockDbGet = vi.fn(() =>
-  Promise.resolve(
-    storedRow
-      ? [
-          storedRow,
-        ]
-      : [],
-  ),
-);
-const mockDbUpsertIfNewer = vi.fn((_table: string, values: Record<string, string | number>) => {
-  storedRow = {
-    ...storedRow,
-    ...values,
-  };
-  return Promise.resolve([
-    {
-      matrix_id: values.matrix_id,
-    },
-  ]);
-});
-const mockDbUpdate = vi.fn((_table: string, values: Record<string, string>) => {
-  storedRow = {
-    ...storedRow,
-    ...values,
-  };
-  return Promise.resolve([]);
-});
-const mockDbClose = vi.fn();
-const mockDbEnsureColumns = vi.fn(() => Promise.resolve());
-
-const mockDb = {
-  ready: Promise.resolve(),
-  get: mockDbGet,
-  upsertIfNewer: mockDbUpsertIfNewer,
-  update: mockDbUpdate,
-  close: mockDbClose,
-  ensureColumns: mockDbEnsureColumns,
-};
+// The database the bridge queries
+let client: PGlite;
 
 const mockClientInit = vi.fn(() => Promise.resolve());
 const mockClientClose = vi.fn(() => Promise.resolve());
@@ -129,10 +99,6 @@ beforeAll(() => {
   MockRabbitMQClient.mockImplementation(function () {
     return mockClient;
   });
-  // biome-ignore lint/complexity/useArrowFunction: called with new
-  MockDatabase.mockImplementation(function () {
-    return mockDb;
-  });
 });
 
 // Create a proper fetch mock for avatar downloads
@@ -150,9 +116,15 @@ const createMockFetchResponse = (options: { ok?: boolean; status?: number; statu
   arrayBuffer: () => Promise.resolve(new ArrayBuffer(1000)),
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
-  storedRow = null;
+  const database = await openTestDatabase();
+  client = database.client;
+  mockOpenDatabase.mockReturnValue({
+    db: database.db,
+  });
+  mockMigrate.mockResolvedValue(undefined);
+  mockCloseDatabase.mockResolvedValue(undefined);
   mockGetProfileInfo.mockResolvedValue({});
   mockUploadContentFromUrl.mockResolvedValue("mxc://example.com/uploaded123");
   mockUploadContent.mockResolvedValue("mxc://example.com/uploaded123");
@@ -184,8 +156,7 @@ const createTestConfig = (adminRetryMode: "disabled" | "fallback" | "exclusive" 
     routingKey: "settings.update",
   },
   database: {
-    engine: "sqlite",
-    name: ":memory:",
+    name: "tombridge",
   },
 });
 
@@ -220,17 +191,11 @@ describe("CommonSettingsBridge - Message Parsing", () => {
 
     await messageHandler(createTestMessage());
 
-    expect(mockDbUpsertIfNewer).toHaveBeenCalledWith(
-      "usersettings",
-      expect.objectContaining({
+    expect((await client.query("SELECT matrix_id FROM usersettings")).rows).toEqual([
+      {
         matrix_id: "@user:example.com",
-      }),
-      "matrix_id",
-      [
-        "version",
-        "timestamp",
-      ],
-    );
+      },
+    ]);
   });
 
   it("should ack-and-drop messages where matrix_id is missing (no retry storm)", async () => {
@@ -247,7 +212,7 @@ describe("CommonSettingsBridge - Message Parsing", () => {
     });
 
     await expect(messageHandler(testMessage)).resolves.toBeUndefined();
-    expect(mockDbUpsertIfNewer).not.toHaveBeenCalled();
+    expect((await client.query("SELECT matrix_id FROM usersettings")).rows).toEqual([]);
   });
 });
 
@@ -468,7 +433,7 @@ describe("CommonSettingsBridge - Lifecycle", () => {
     await bridge.stop();
 
     expect(mockClientClose).toHaveBeenCalled();
-    expect(mockDbClose).toHaveBeenCalled();
+    expect(mockCloseDatabase).toHaveBeenCalled();
   });
 
   it("should check admin privileges on start", async () => {

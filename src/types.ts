@@ -1,5 +1,3 @@
-import type { Logger as PinoLogger } from "pino";
-
 /**
  * AMQP server connection settings.
  */
@@ -92,16 +90,15 @@ export interface BridgeAmqpConfig {
 }
 
 /**
- * Configuration for the bridge's database connection.
+ * Configuration for the bridge's Postgres database.
  */
 export interface DatabaseConfig {
-  readonly engine: "sqlite" | "pg";
+  /** The host, or `host:port`. Defaults to localhost. */
   readonly host?: string;
   readonly name?: string;
   readonly user?: string;
   readonly password?: string;
   readonly ssl?: boolean;
-  readonly vacuumDelay?: number;
 }
 
 /**
@@ -160,52 +157,6 @@ export interface BridgeConfig {
   readonly deletion?: DeletionConfig;
   /** Matrix spaces for TwakeSpace spaces. Off when omitted. */
   readonly spaces?: SpacesConfig;
-}
-
-/**
- * Type literal for the bridge's database table names.
- */
-export type UserSettingsTableName = "usersettings" | "spaceclock" | "spaces";
-
-/**
- * Minimal logger interface for creating adapters.
- */
-export interface AppLogger {
-  error: (...args: unknown[]) => void;
-  warn: (...args: unknown[]) => void;
-  info: (...args: unknown[]) => void;
-  debug: (...args: unknown[]) => void;
-}
-
-/**
- * Shape of the logger adapter consumed by the local ./db module
- * (pino-compatible surface).
- */
-export interface TwakeLoggerAdapter {
-  error: (...args: unknown[]) => void;
-  warn: (...args: unknown[]) => void;
-  info: (...args: unknown[]) => void;
-  debug: (...args: unknown[]) => void;
-  silly: (...args: unknown[]) => void;
-  close: () => void;
-}
-
-/**
- * Creates a pino-compatible adapter from an AppLogger with a prefix.
- * @param log - The source logger to wrap
- * @param prefix - Prefix to add to all log messages (e.g., 'DB', 'AMQP')
- * @returns A pino-compatible logger object
- */
-export function createLoggerAdapter(log: AppLogger, prefix: string): PinoLogger {
-  const adapter: TwakeLoggerAdapter = {
-    error: (...args: unknown[]) => log.error(`[${prefix}]`, ...args),
-    warn: (...args: unknown[]) => log.warn(`[${prefix}]`, ...args),
-    info: (...args: unknown[]) => log.info(`[${prefix}]`, ...args),
-    debug: (...args: unknown[]) => log.debug(`[${prefix}]`, ...args),
-    silly: (...args: unknown[]) => log.debug(`[${prefix}][SILLY]`, ...args),
-    close: () => {},
-  };
-  return adapter as unknown as PinoLogger;
 }
 
 // =============================================================================

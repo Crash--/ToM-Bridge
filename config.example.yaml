@@ -15,15 +15,14 @@ synapse:
   # avatarFetchTimeoutMs: 10000      # 10 seconds
 
 # Database Configuration
-# PostgreSQL connection details for storing application state and settings
+# PostgreSQL connection details for storing application state and settings.
+# The bridge creates and migrates its tables at start.
 database:
-  engine: 'pg'
-  host: 'postgres'
+  host: 'postgres'  # or 'postgres:5432'
   name: 'tom_db'
   user: 'twake'
   password: 'twake_password'
   ssl: false
-  vacuumDelay: 3600  # 1 hour in seconds
 
 # RabbitMQ Configuration
 # Message queue setup for publishing and consuming settings update events

@@ -94,5 +94,8 @@ export const AppServiceRegistration: {
 // @linagora/rabbitmq-client
 export const RabbitMQClient: MockFn = vi.fn<AnyFn>();
 
-// ./db
-export const Database: MockFn = vi.fn<AnyFn>();
+// ./db: the queries run on a PGlite database the tests open, the lock and the migrations are watched
+export const openDatabase: MockFn = vi.fn<AnyFn>();
+export const migrate: MockFn = vi.fn<AnyFn>();
+export const withLock: MockFn = vi.fn<AnyFn>();
+export const closeDatabase: MockFn = vi.fn<AnyFn>();

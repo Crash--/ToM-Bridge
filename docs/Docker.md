@@ -76,13 +76,11 @@ synapse:
   adminRetryMode: 'fallback'
 
 database:
-  engine: 'pg'
   host: 'postgres'
   name: 'tom_db'
   user: 'twake'
   password: 'twake_password'
   ssl: false
-  vacuumDelay: 3600
 
 rabbitmq:
   host: 'rabbitmq'

@@ -23,13 +23,11 @@ in
     synapse.adminRetryMode = "fallback";
 
     database = {
-      engine = "pg";
       host = "127.0.0.1";
       name = pg.db;
       user = pg.user;
       password = pg.password;
       ssl = false;
-      vacuumDelay = 3600;
     };
 
     rabbitmq = {

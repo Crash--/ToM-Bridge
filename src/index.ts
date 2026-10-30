@@ -62,7 +62,7 @@ function startBridge(_port: number | null, config: Record<string, unknown> | nul
   log.debug("Configuration loaded:");
   log.debug(`  Homeserver: ${bridgeConfig.homeserverUrl}`);
   log.debug(`  Domain: ${bridgeConfig.domain}`);
-  log.debug(`  Database: ${bridgeConfig.database?.engine} (${bridgeConfig.database?.name})`);
+  log.debug(`  Database: ${bridgeConfig.database?.host} (${bridgeConfig.database?.name})`);
   log.debug(`  RabbitMQ: ${bridgeConfig.rabbitmq?.host}:${bridgeConfig.rabbitmq?.port}`);
 
   const bridge = new CommonSettingsBridge(bridgeConfig);

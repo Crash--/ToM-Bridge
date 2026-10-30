@@ -43,7 +43,7 @@ in
     pkgs.mkcert
   ];
 
-  # C++ runtime needed by native node addons (e.g. sqlite3 prebuilt binaries)
+  # C++ runtime needed by native node addons
   # env.LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ];
 
   opencode = {

@@ -2,9 +2,10 @@ import type { SynapseAdminApis } from "@vector-im/matrix-bot-sdk";
 import { Bridge, type Intent, Logger } from "matrix-appservice-bridge";
 
 import { RabbitMQClient } from "@linagora/rabbitmq-client";
+import { isTransient } from "@linagora/twake-node-server/postgres";
 
 import { createUserDeletedHandler } from "./account-eraser.js";
-import { Database } from "./db/index.js";
+import { closeDatabase, type Database, migrate, openDatabase, withLock } from "./db.js";
 import {
   DEFAULT_AVATAR_FETCH_TIMEOUT_MS,
   DEFAULT_MAX_AVATAR_BYTES,
@@ -17,23 +18,19 @@ import { SettingsRepository } from "./settings-repository.js";
 import {
   createKeyedLock,
   createSpaceEventHandler,
-  type KnownSpace,
   purgeDeletedSpaces,
   requestFirstSync,
-  type SpaceClock,
   type SpaceLock,
-  type SpaceRegistry,
 } from "./space-provisioner.js";
+import { createSpaceClock, createSpaceRegistry } from "./space-store.js";
 import {
   type BridgeConfig,
   type CommonSettingsMessage,
-  createLoggerAdapter,
   type ISettingsPayload,
   MessageParseError,
   type StoredUserSettings,
   SynapseAdminRetryMode,
   UserIdNotProvidedError,
-  type UserSettingsTableName,
 } from "./types.js";
 
 // =============================================================================
@@ -115,7 +112,7 @@ export class CommonSettingsBridge {
   #bridge!: Bridge;
   #botIntent!: Intent;
   #adminApis!: SynapseAdminApis;
-  #db!: Database<UserSettingsTableName>;
+  #db!: Database;
   #client!: RabbitMQClient;
   #settingsRepository!: SettingsRepository;
   #profileUpdater!: MatrixProfileUpdater;
@@ -136,46 +133,16 @@ export class CommonSettingsBridge {
   }
 
   /**
-   * Initializes the database connection with the user settings table schema.
-   * The database stores Matrix user IDs mapped to their settings JSON, version number,
-   * timestamp, and request_id for idempotency.
+   * Opens the Postgres database, whose tables start() migrates. No connection
+   * opens before its first query.
    */
   #initDatabase(): void {
-    this.#log.debug("Initializing database connection...");
+    const { host, name, user, ssl } = this.#config.database;
+    this.#log.debug(`Database config: host=${host}, name=${name}, user=${user}, ssl=${ssl ?? false}`);
 
-    const dbConfig = {
-      database_engine: this.#config.database.engine,
-      database_host: this.#config.database.host ?? "localhost",
-      database_name: this.#config.database.name,
-      database_user: this.#config.database.user,
-      database_password: this.#config.database.password,
-      database_ssl: this.#config.database.ssl ?? false,
-      database_vacuum_delay: this.#config.database.vacuumDelay ?? 3600,
-    };
-
-    this.#log.debug(
-      `Database config: engine=${dbConfig.database_engine}, host=${dbConfig.database_host}, name=${dbConfig.database_name}, user=${dbConfig.database_user}, ssl=${dbConfig.database_ssl}, vacuumDelay=${dbConfig.database_vacuum_delay}s`,
-    );
-
-    const dbLogger = createLoggerAdapter(this.#log, "DB");
-
-    const tables: Record<UserSettingsTableName, string> = {
-      usersettings:
-        "matrix_id varchar(255) PRIMARY KEY, settings jsonb, version int DEFAULT 1, timestamp bigint DEFAULT 0, request_id varchar(255) DEFAULT '', avatar_source text, avatar_mxc text",
-      spaceclock: "clock_key varchar(255) PRIMARY KEY, timestamp bigint",
-      spaces:
-        "space_id varchar(255) PRIMARY KEY, organization_id varchar(255), room_id varchar(255), timestamp bigint, delete_at bigint DEFAULT 0",
-    };
-
-    this.#db = new Database<UserSettingsTableName>(dbConfig, dbLogger, tables);
-
-    // Attach a no-op rejection handler eagerly so a DB that fails before
-    // start() awaits `#db.ready` (after the slow bridge init) doesn't surface
-    // as an unhandled rejection and kill the process. start() handles the
-    // failure itself by falling back to degraded mode.
-    this.#db.ready.catch(() => {});
-
-    this.#log.debug("Database instance created");
+    this.#db = openDatabase(this.#config.database, {
+      error: (object, message) => this.#log.error(message, object),
+    });
   }
 
   /**
@@ -401,137 +368,13 @@ export class CommonSettingsBridge {
   }
 
   /**
-   * Spaces need the database, and never read the degraded mode of the
-   * settings: an event the database cannot answer fails and is retried, since
-   * applied without its checks it could undo a newer one or revive a deleted space.
-   */
-  #createSpaceClock(): SpaceClock {
-    return {
-      latest: async (key) => {
-        const rows = await this.#db.get(
-          "spaceclock",
-          [
-            "timestamp",
-          ],
-          {
-            clock_key: key,
-          },
-        );
-        return rows.length > 0 ? Number(rows[0]?.timestamp) : null;
-      },
-      record: async (key, timestamp) => {
-        // The change is already on the homeserver, so a failed write only loses the ordering check for this key
-        try {
-          const updated = await this.#db.update(
-            "spaceclock",
-            {
-              timestamp,
-            },
-            "clock_key",
-            key,
-          );
-          if (updated.length === 0) {
-            await this.#db.insert("spaceclock", {
-              clock_key: key,
-              timestamp,
-            });
-          }
-        } catch (error) {
-          this.#log.warn(`Could not record ${key}: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      },
-    };
-  }
-
-  /**
    * One event per space at a time: in this pod, then across the pods through
    * the database. An event the database cannot lock fails and is retried:
    * applied without the lock, it could run beside the pod that holds it.
    */
   #createSpaceLock(): SpaceLock {
     const inThisPod = createKeyedLock();
-    return (key, fn) => inThisPod(key, () => this.#db.withLock(key, fn));
-  }
-
-  /** The Matrix space of each space, and when it is due for deletion. */
-  #createSpaceRegistry(): SpaceRegistry {
-    const fields = [
-      "space_id",
-      "organization_id",
-      "room_id",
-      "timestamp",
-      "delete_at",
-    ];
-    const toSpace = (row: Record<string, unknown>): KnownSpace => ({
-      spaceId: String(row.space_id),
-      organizationId: String(row.organization_id),
-      roomId: row.room_id ? String(row.room_id) : null,
-      timestamp: Number(row.timestamp),
-    });
-    const rowOf = (space: KnownSpace): Record<string, string | number> => ({
-      organization_id: space.organizationId,
-      room_id: space.roomId ?? "",
-      timestamp: space.timestamp,
-    });
-    const upsert = async (space: KnownSpace, values: Record<string, string | number>): Promise<void> => {
-      const updated = await this.#db.update("spaces", values, "space_id", space.spaceId);
-      if (updated.length === 0) {
-        await this.#db.insert("spaces", {
-          space_id: space.spaceId,
-          delete_at: 0,
-          ...values,
-        });
-      }
-    };
-    return {
-      remember: (space) =>
-        upsert(space, {
-          ...rowOf(space),
-          delete_at: 0,
-        }),
-      deletionOf: async (spaceId) => {
-        const rows = await this.#db.get(
-          "spaces",
-          [
-            "delete_at",
-          ],
-          {
-            space_id: spaceId,
-          },
-        );
-        const deleteAt = Number(rows[0]?.delete_at ?? 0);
-        return deleteAt > 0 ? deleteAt : null;
-      },
-      scheduleDeletion: async (space, at) => {
-        await upsert(space, {
-          ...rowOf(space),
-          delete_at: at,
-        });
-      },
-      spacesOf: async (organizationId) => {
-        const rows = await this.#db.get("spaces", fields, {
-          organization_id: organizationId,
-        });
-        return rows.filter((row) => Number(row.delete_at) === 0).map(toSpace);
-      },
-      dueBy: async (time) => {
-        const rows = await this.#db.getHigherThan("spaces", fields, {
-          delete_at: 0,
-        });
-        return rows.filter((row) => Number(row.delete_at) <= time).map(toSpace);
-      },
-      forget: async (spaceId) => {
-        await this.#db.deleteEqual("spaces", "space_id", spaceId);
-      },
-      hasSpaces: async (organizationId) => {
-        const rows = organizationId
-          ? await this.#db.get("spaces", fields, {
-              organization_id: organizationId,
-            })
-          : await this.#db.getAll("spaces", fields);
-        return rows.length > 0;
-      },
-    };
+    return (key, fn) => inThisPod(key, () => withLock(this.#db, key, fn));
   }
 
   /**
@@ -578,73 +421,45 @@ export class CommonSettingsBridge {
       }
 
       // OPTIONAL: Database (degrade gracefully if unavailable)
+      // Timeout to prevent indefinite hang
+      const DB_READY_TIMEOUT_MS = 30000; // 30 seconds
+      const timeout = new Error(`Database connection timeout after ${DB_READY_TIMEOUT_MS}ms`);
       try {
         this.#log.info("Waiting for database to be ready...");
 
-        // Timeout to prevent indefinite hang
-        const DB_READY_TIMEOUT_MS = 30000; // 30 seconds
         const timeoutPromise = new Promise((_, reject) => {
           setTimeout(() => {
-            reject(new Error(`Database connection timeout after ${DB_READY_TIMEOUT_MS}ms`));
+            reject(timeout);
           }, DB_READY_TIMEOUT_MS);
         });
 
+        this.#log.info("Migrating the database...");
         await Promise.race([
-          this.#db.ready,
+          migrate(this.#db),
           timeoutPromise,
         ]);
-        this.#log.info("Database connection established");
+        this.#log.info("Database migrated");
 
-        // Ensure all required columns exist (handles schema migrations)
-        this.#log.info("Ensuring database schema is up to date...");
-        await this.#db.ensureColumns("usersettings", [
-          {
-            name: "settings",
-            type: "jsonb",
-            default: null,
-          },
-          {
-            name: "version",
-            type: "int",
-            default: 1,
-          },
-          {
-            name: "timestamp",
-            type: "bigint",
-            default: 0,
-          },
-          {
-            name: "request_id",
-            type: "varchar(255)",
-            default: "",
-          },
-          {
-            name: "avatar_source",
-            type: "text",
-            default: null,
-          },
-          {
-            name: "avatar_mxc",
-            type: "text",
-            default: null,
-          },
-        ]);
-        this.#log.info("Database schema verified");
-
-        // Initialize repository
-        this.#log.debug("Initializing settings repository...");
-        this.#settingsRepository = new SettingsRepository(this.#db, this.#log);
+        this.#settingsRepository = new SettingsRepository(this.#db.db, this.#log);
         this.#isDatabaseAvailable = true;
       } catch (error) {
-        this.#log.warn("==========================================");
+        const reason = error instanceof Error ? error.message : String(error);
+        // A server that does not answer may come back; a refused migration (grants, SQL) needs an operator
+        const unavailable = error === timeout || isTransient(error);
+        if (!unavailable) {
+          this.#log.error(
+            `DATABASE MIGRATION FAILED: ${reason}. The database user must own the database or hold CREATE on it, and on the public schema before Postgres 18`,
+          );
+        }
         if (this.#config.spaces) {
-          throw new Error(`Spaces need the database: ${error instanceof Error ? error.message : String(error)}`, {
+          throw new Error(`Spaces need the database, the bridge does not start without it: ${reason}`, {
             cause: error,
           });
         }
-        this.#log.warn("DATABASE UNAVAILABLE - Running in degraded mode");
+        this.#log.warn("==========================================");
+        this.#log.warn(`DATABASE ${unavailable ? "UNAVAILABLE" : "NOT MIGRATED"} - Running in degraded mode`);
         this.#log.warn("Idempotency and version checks disabled");
-        this.#log.warn(`Error: ${error instanceof Error ? error.message : String(error)}`);
+        this.#log.warn(`Error: ${reason}`);
         this.#log.warn("==========================================");
       }
 
@@ -686,14 +501,15 @@ export class CommonSettingsBridge {
         const spaces = this.#config.spaces;
         if (spaces) {
           const matrix = new MatrixSpaces(this.#botIntent.matrixClient, botUserId, this.#config.domain, this.#log);
-          const registry = this.#createSpaceRegistry();
+          // Spaces need the database and have no degraded mode: an event it cannot answer fails and is retried
+          const registry = createSpaceRegistry(this.#db.db);
           await this.#client.subscribe(
             spaces.exchange,
             spaces.routingKey,
             spaces.queue,
             createSpaceEventHandler({
               matrix,
-              clock: this.#createSpaceClock(),
+              clock: createSpaceClock(this.#db.db, this.#log),
               lock: this.#createSpaceLock(),
               registry,
               publish: (type, event) =>
@@ -704,8 +520,8 @@ export class CommonSettingsBridge {
               config: spaces,
               log: this.#log,
             }),
-            // ponytail: each event holds a database connection for its space lock and queries on another,
-            // so half the pool (pg's default of 10) at most; pass the lock's connection to the queries to go higher
+            // ponytail: each event opens a database connection for its space lock and queries on the pool
+            // (10, see db.ts); raise both together to go higher
             {
               concurrency: SPACE_EVENTS_AT_ONCE,
             },
@@ -798,7 +614,7 @@ export class CommonSettingsBridge {
     if (this.#db) {
       this.#log.info("Closing database connection...");
       try {
-        this.#db.close();
+        await closeDatabase(this.#db);
         this.#log.info("Database closed");
       } catch (error) {
         firstError ??= error;
